@@ -1,0 +1,68 @@
+# --- PatchRaptor Specific ---
+# Secrets & Local Configuration
+config.json
+webpanel_config.json
+config.yml
+credentials.json
+.env
+*.pem
+*.key
+
+# cloudflared
+cloudflared.exe
+.cloudflared/
+tunnel_debug.log
+
+# Runtime Data & State
+schedule.json
+uptime_stats.json
+player_stats.json
+bans.json
+eula_accepted.json
+version.txt
+backup.txt
+
+# Application Logs & Backups
+logs/
+*.log
+backups/
+map_image_backups/
+
+# PyInstaller / Build
+*.spec
+dist/
+build/
+
+# --- Python Standard ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+pythonenv*
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+*.cover
+*.py,cover
+.hypothesis/
+
+# --- IDEs & Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+nbproject/
+.project
+.settings/

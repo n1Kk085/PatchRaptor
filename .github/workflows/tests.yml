@@ -1,0 +1,35 @@
+name: PatchRaptor Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        
+    - name: Run Verification Script
+      shell: cmd
+      # We modify the verify script slightly to not pause on CI, or just run commands directly
+      # For simplicity and robustness, we run the commands directly here to avoid interactive pauses
+      run: |
+        echo [1/2] Running Smoke Tests...
+        python tests/smoke_test.py
+        
+        echo [2/2] Running Full Test Suite...
+        pytest tests/
