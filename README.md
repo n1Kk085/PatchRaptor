@@ -1,13 +1,18 @@
 # PatchRaptor 
 **ARK: Survival Ascended - Server Admin Discord Bot**
 
-## Why PatchRaptor?
+##  About PatchRaptor
+PatchRaptor is available free to the community, however if you find value in it and wish to show support you can always buy me a coffee 🙂
 
-I've been running SteamCMD servers for ASA since release day, scaling from a single map to a full cluster as the community grew. But as real life got busier, the time involved to manage and update servers was harder to find so I wanted to find a way to guarantee the server uptime and performance our community had grown to expect. 
+https://buymeacoffee.com/patchraptor
 
-I needed a way to automate updates, backups, and restarts and also wanted to be able to easily do it from my phone while I'm away. And now we're here. I run PatchRaptor in a test environment on a cluster of 2 servers which can be seen here: ---> https://discord.gg/dS3xKYUK96 and for the last 3 months has been deployed in a production environment managing a cluster of 9 servers.
-PatchRaptor is a powerful toolkit designed for server owners to create, manage, and customize their own Discord bot for ARK: Survival Ascended. This tool is specifically designed for Self-Hosted Dedicated Servers (clusters) configured via SteamCMD and Windows OS. This tool is not designed to be used with any commercial hosting providers.
-    
+## So What is it?
+PatchRaptor is a Python-based toolkit for Windows (Server 2019–2022 & Win 10–11) designed to automate ARK clusters managed via SteamCMD. 
+It allows you to create and customize your own Discord bot via the Developer Portal, configure it effortlessly using our built-in GUI, and manage your entire cluster directly from Discord. 
+To get started, you’ll need to create and configure your own Discord bot. While we'd to offer a hosted bot solution it's just not possible at this stage.
+Simply launch the application, click 'Start', and your command center is ready.
+
+Your input is incredibly helpful. If you find PatchRaptor useful or have suggestions, please reach out and thank you for being part of this journey 
 ## Key Features
     
 ### 1. Interactive Discord Interface
