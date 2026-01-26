@@ -5,6 +5,6 @@ Pillow==11.0.0
 customtkinter==5.2.2
 pywin32==306
 waitress==3.0.0; sys_platform == 'win32'
-aiohttp==3.10.11
+aiohttp==3.13.3
 Flask==3.0.3
 asgiref==3.7.2
