@@ -45,7 +45,7 @@ Restarts the ARK servers.
 - **Usage:**
     - `.reboot`: Restarts **ALL** servers (staggered by 30s).
     - `.reboot <map_name>`: Restarts a specific server (e.g., `.reboot scorched`).
-- **Process:** Stops Chat Relay -> Sends `DoExit` -> Waits for shutdown -> Starts Server -> Waits for Online -> Reconnects Chat after 5 minutes.
+- **Process:** Stops Chat Relay -> Sends `DoExit` -> Waits for shutdown -> Starts Server -> Waits for Online -> Reconnects Chat after 2 minutes.
 
 ### `.shutdown [map_name]`
 Gracefully stops the ARK servers.

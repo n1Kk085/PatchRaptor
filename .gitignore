@@ -53,6 +53,11 @@ _design_assets/
 *~
 
 # ==========================
+# Release Documentation (Ignore in Git)
+# ==========================
+readme_release.md
+
+# ==========================
 # OS Files
 # ==========================
 .DS_Store
