@@ -1,0 +1,60 @@
+# .gitignore for PatchRaptor
+# ---------------------------------------------------
+# STRATEGY: Explicitly ignore unwanted files/folders
+
+# ==========================
+# Build Artifacts
+# ==========================
+build/
+dist/
+build_tools/
+Output/
+*.spec
+*.exe
+*.iss
+
+# ==========================
+# Python Cache
+# ==========================
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==========================
+# Runtime Data & Logs
+# ==========================
+logs/
+*.log
+
+# ==========================
+# Config Files (ignore actual configs, keep examples)
+# ==========================
+config.json
+webpanel_config.json
+schedule.json
+bans.json
+version.txt
+
+# ==========================
+# Design Assets
+# ==========================
+_design_assets/
+
+# ==========================
+# IDE / Editor
+# ==========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ==========================
+# OS Files
+# ==========================
+.DS_Store
+Thumbs.db
+desktop.ini

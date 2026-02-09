@@ -1,0 +1,232 @@
+# PATCHRAPTOR CONTROLLED SOURCE LICENSE (PR-CSL)
+
+Copyright (c) 2026 n1Kk085
+
+---
+
+## 1. DEFINITIONS
+
+"Software" refers to PatchRaptor, including all associated source code, documentation, configuration files, and compiled binaries.
+
+"You" refers to any individual or organization accessing or using the Software.
+
+"Official Distribution" refers exclusively to releases published and distributed by the author via **[https://patchraptor.online](https://patchraptor.online)**.
+
+---
+
+## 2. GRANT OF LICENSE
+
+The author (n1Kk085) grants You a worldwide, royalty-free, non-exclusive, non-transferable license to:
+
+(a) **USE** the Software for personal or commercial server administration purposes, including servers that generate revenue (such as donations, subscriptions, paid hosting, or webstores).
+
+(b) **VIEW** the source code solely for purposes of transparency, security auditing, verification, and education.
+
+(c) **MODIFY** the source code solely for Your own internal, private use. Modified versions may be executed and used by You but may not be shared, disclosed, provided, or made available to any third party under any circumstances.
+
+---
+
+## 3. RESTRICTIONS
+
+You may NOT:
+
+(a) **Redistribute** the Software or any portion thereof, in source or binary form, including but not limited to:
+
+* Uploading to other websites, repositories, or file-sharing services
+* Forking or mirroring the GitHub repository
+* Sharing modified or unmodified source code
+* Sharing compiled executables, portable archives (.zip), installers, or container images
+* Packaging the Software into other tools, bundles, or distributions
+
+(b) **Distribute derivative works**, including any modified version, fork, adaptation, or build of the Software, whether free or commercial.
+
+(c) **Sell, rent, lease, sublicense, or otherwise commercially distribute** the Software itself or any portion thereof.
+
+(d) **Remove, alter, or obscure** copyright notices, license text, or attribution.
+
+(e) **Use the name "PatchRaptor"** or related branding in a manner that implies endorsement, affiliation, or authorship without explicit written permission.
+
+---
+
+## 4. OFFICIAL DISTRIBUTION AND BINARIES
+
+Only the author (n1Kk085) retains the exclusive right to build, package, and distribute official releases of the Software, including but not limited to:
+
+* Compiled executables (.exe)
+* Portable archives (.zip)
+* Installers
+* Any other pre-built or packaged form
+
+Official releases are available exclusively via:
+
+**[https://patchraptor.online](https://patchraptor.online)**
+
+Any distribution obtained from other sources is unauthorized and potentially unsafe.
+
+---
+
+## 5. SOURCE CODE AVAILABILITY
+
+The source code is made publicly available for the following purposes only:
+
+* Transparency and trust
+* Security auditing and verification
+* Bug reporting and feedback
+* Educational reference
+
+Public availability of the source code does **not** grant permission to fork, mirror, redistribute, or publish the repository or any portion thereof.
+
+---
+
+## 6. FEEDBACK AND CONTRIBUTIONS
+
+Feedback, bug reports, and feature suggestions are welcome via the official PatchRaptor Discord:
+
+**[https://discord.gg/NmHbruVs56](https://discord.gg/NmHbruVs56)**
+
+Pull requests, patches, or external code contributions are not accepted. All development decisions and implementations are managed solely by the author to preserve security, quality, and project direction.
+
+---
+
+## 7. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+## 8. DINO DISCLAIMER
+
+By using this Software, You acknowledge that the author is not responsible if you are stunned by a Purlovia, your servers are eaten by a Giga, your router is stepped on by a Bronto, or if your players are chased by a pack of angry Terror Birds. This Software is provided "as is" and may bite.
+
+---
+
+## 9. TRADEMARK DISCLAIMER
+
+PatchRaptor is an independent, unofficial tool and is not affiliated with, endorsed by, or associated with Studio Wildcard or Snail Games. ARK: Survival Ascended is a trademark of Studio Wildcard.
+
+---
+
+## 10. THIRD-PARTY SOFTWARE LICENSES
+
+The Software incorporates several third-party software components licensed under their respective open source licenses. The full text of these licenses is provided below and forms part of this Agreement:
+
+### Python Software Foundation License (Python, pywin32)
+
+Copyright (c) 2001-2023 Python Software Foundation; All Rights Reserved
+
+1. This LICENSE AGREEMENT is between the Python Software Foundation ("PSF"), and the Individual or Organization ("Licensee") accessing and otherwise using this software ("Python") in source or binary form and its associated documentation.
+
+2. Subject to the terms and conditions of this License Agreement, PSF hereby grants Licensee a nonexclusive, royalty-free, world-wide license to reproduce, analyze, test, perform and/or display publicly, prepare derivative works, distribute, and otherwise use Python alone or in any derivative version, provided, however, that PSF's License Agreement and PSF's notice of copyright, i.e., "Copyright (c) 2001-2023 Python Software Foundation; All Rights Reserved" are retained in Python alone or in any derivative version prepared by Licensee.
+
+3. In the event Licensee prepares a derivative work that is based on or incorporates Python or any part thereof, and wants to make the derivative work available to others as provided herein, then Licensee hereby agrees to include in any such work a brief summary of the changes made to Python.
+
+4. PSF is making Python available to Licensee on an "AS IS" basis. PSF MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED. BY WAY OF EXAMPLE, BUT NOT LIMITATION, PSF MAKES NO AND DISCLAIMS ANY REPRESENTATION OR WARRANTY OF MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF PYTHON WILL NOT INFRINGE ANY THIRD PARTY RIGHTS.
+
+5. PSF SHALL NOT BE LIABLE TO LICENSEE OR ANY OTHER USERS OF PYTHON FOR ANY INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS AS A RESULT OF MODIFYING, DISTRIBUTING, OR OTHERWISE USING PYTHON, OR ANY DERIVATIVE THEREOF, EVEN IF ADVISED OF THE POSSIBILITY THEREOF.
+
+6. This License Agreement will automatically terminate upon a material breach of its terms and conditions.
+
+7. Nothing in this License Agreement shall be deemed to create any relationship of agency, partnership, or joint venture between PSF and Licensee. This License Agreement does not grant permission to use PSF trademarks or trade name in a trademark sense to endorse or promote products or services of Licensee, or any third party.
+
+8. By copying, installing or otherwise using Python, Licensee agrees to be bound by the terms and conditions of this License Agreement.
+
+### MIT License (CustomTkinter, discord.py, python-dotenv)
+
+Copyright (c) 2023 Tom Schimansky (CustomTkinter)
+Copyright (c) 2015-2023 Rapptz (discord.py)
+Copyright (c) 2014-2023 Dave Padbury (python-dotenv)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### Apache License 2.0 (aiohttp)
+
+Copyright (c) 2013-2023 aiohttp contributors
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+
+### BSD 3-Clause License (psutil, Flask, asgiref)
+
+Copyright (c) 2009, Giampaolo Rodola' (psutil). All rights reserved.
+Copyright (c) 2010 by Armin Ronacher and Flask contributors.
+Copyright (c) 2014 by Django Software Foundation and asgiref contributors.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+### HPND License (Pillow/PIL)
+
+Copyright © 1997-2011 by Secret Labs AB
+Copyright © 1995-2011 by Fredrik Lundh
+Copyright © 2010-2023 by Pillow Contributors
+
+By obtaining, using, and/or copying this software and/or its associated documentation, you agree that you have read, understood, and will comply with the following terms and conditions:
+
+Permission to use, copy, modify, and distribute this software and its associated documentation for any purpose and without fee is hereby granted, provided that the above copyright notice appears in all copies, and that both that copyright notice and this permission notice appear supporting documentation, and that the name of Secret Labs AB or the author not be used in advertising or publicity pertaining to distribution of the software without specific, written prior permission.
+
+SECRET LABS AB AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL SECRET LABS AB OR THE AUTHOR BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA, OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+### Zope Public License 2.1 (waitress)
+
+Copyright (c) 2001-2023 Zope Foundation and Contributors. All rights reserved.
+
+This license has been certified as open source. It has also been designated as GPL compatible by the Free Software Foundation (FSF).
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+3. The name Zope Foundation must not be used to endorse or promote products derived from this software without prior written permission from the Zope Foundation.
+4. The right to distribute this software or to use it for any purpose does not give you the right to use Servicemarks (sm) or Trademarks (tm) of the Zope Foundation. Use of them is covered by separate agreement with the Zope Foundation.
+5. If any files are modified, you must cause the modified files to carry prominent notices stating that you changed the files and the date of any change.
+
+Disclaimer:
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+### PyInstaller (Bootloader)
+
+The Software is distributed as a standalone executable built with PyInstaller. The PyInstaller bootloader is licensed under the GPL 2.0 license with a "Bootloader Exception" which explicitly permits the distribution of programs built with PyInstaller under your own license terms without needing to open-source your own code.
+
+---
+
+## 11. GOVERNING LAW
+
+This Agreement shall be governed by and construed in accordance with the laws of Australia. Any disputes shall be subject to the exclusive jurisdiction of the courts of Australia.
+
+---
+
+## 12. ENTIRE AGREEMENT
+
+This Agreement constitutes the entire agreement between You and the author regarding the Software and supersedes all prior communications or understandings.
+
+---
+
+## 13. SEVERABILITY
+
+If any provision of this Agreement is held to be invalid or unenforceable, the remaining provisions shall remain in full force and effect.
+
+---
+
+## 14. AMENDMENTS
+
+The author reserves the right to modify this Agreement at any time. Continued use of the Software after changes are published constitutes acceptance of the updated terms.
+
+---
+
+**Last updated: February 8, 2026**

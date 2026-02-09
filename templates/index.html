@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+    <title>PatchRaptor | Server Manager</title>
+
+    <!-- SEO Meta Tags -->
+    <meta name="description"
+        content="PatchRaptor is a free, source-available automation companion for ARK: Survival Ascended, designed to seamlessly integrate with your existing SteamCMD ARK server installation.">
+    <meta name="keywords" content="ARK Survival Ascended, ASA, PatchRaptor, Server Manager">
+    <meta name="author" content="n1Kk085">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Override specific styles for single page layout */
+        .tab-content {
+            display: block !important;
+            animation: none;
+        }
+
+        .hero-title {
+            font-size: 2rem;
+        }
+
+        header {
+            padding-bottom: 20px;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0;
+            width: 100%;
+        }
+
+        .header-left {
+            flex: 1;
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+        }
+
+        .header-center {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .header-right {
+            flex: 1;
+        }
+
+        .logo {
+            margin-right: 0;
+        }
+
+        #dashboard-title {
+            margin: 0;
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <!-- Left: Logo + Name -->
+                <div class="header-left">
+                    <div class="logo">
+                        <img src="/static/pr-profile.png" alt="Logo" onerror="this.style.display='none'">
+                        PatchRaptor
+                    </div>
+                </div>
+
+                <!-- Center: Dashboard Title -->
+                <div class="header-center">
+                    <h1 id="dashboard-title">Dashboard</h1>
+                </div>
+
+                <!-- Right: Live Status -->
+                <div class="header-right" style="text-align: right;">
+                    <div
+                        style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: #4ade80; font-size: 0.875rem;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                        </svg>
+                        <span>Live</span>
+                    </div>
+                    <p id="last-update-header" style="font-size: 0.75rem; color: #6b7280; margin: 0;">Never</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+
+        <!-- DASHBOARD (Live Monitor) -->
+        <div id="dashboard" class="tab-content">
+            <!-- Stats Row -->
+            <div class="stats-row"
+                style="display: flex; gap: 12px; margin-top: 16px; margin-bottom: 20px; flex-wrap: wrap;">
+                <div class="feature-card" style="flex: 1; text-align: center; min-width: 150px; padding: 12px;">
+                    <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 4px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            style="margin-right: 4px;">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                        </svg>
+                        <span style="font-size: 0.875rem; color: #9ca3af;">Total Players</span>
+                    </div>
+                    <p id="total-players" style="font-size: 1.5rem; color: #60a5fa; font-weight: bold; margin: 0;">0
+                    </p>
+                </div>
+                <div class="feature-card" style="flex: 1; text-align: center; min-width: 150px; padding: 12px;">
+                    <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 4px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            style="margin-right: 4px;">
+                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                        </svg>
+                        <span style="font-size: 0.875rem; color: #9ca3af;">Online</span>
+                    </div>
+                    <p id="online-servers" style="font-size: 1.5rem; color: #4ade80; font-weight: bold; margin: 0;">0
+                    </p>
+                </div>
+                <div class="feature-card" style="flex: 1; text-align: center; min-width: 150px; padding: 12px;">
+                    <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 4px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="#c084fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            style="margin-right: 4px;">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        <span style="font-size: 0.875rem; color: #9ca3af;">Avg Uptime</span>
+                    </div>
+                    <p id="avg-uptime" style="font-size: 1.5rem; color: #c084fc; font-weight: bold; margin: 0;">0%</p>
+                </div>
+                <div class="feature-card" style="flex: 1; text-align: center; min-width: 150px; padding: 12px;">
+                    <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 4px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="#facc15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            style="margin-right: 4px;">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                        </svg>
+                        <span style="font-size: 0.875rem; color: #9ca3af;">Avg Players</span>
+                    </div>
+                    <p id="avg-players" style="font-size: 1.5rem; color: #facc15; font-weight: bold; margin: 0;">0</p>
+                </div>
+            </div>
+
+            <!-- Server Grid -->
+            <div id="server-list-container" class="features-grid">
+                <!-- Populated by dashboard.js -->
+                <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-secondary);">
+                    Loading Live Data...
+                </div>
+            </div>
+
+            <!-- Auto-refresh info -->
+            <div style="text-align: center; font-size: 0.8rem; color: #666; margin-top: 20px; margin-bottom: 10px;">
+                Auto-refresh: 30s • Last Updated: <span id="last-update">Never</span>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <p style="margin: 0;">&copy; 2026 PatchRaptor -<img src="/static/cherries.ico" alt="Cherries"
+                    style="height: 32px; width: 32px; vertical-align: middle;">- n1Kk085</p>
+        </div>
+    </footer>
+
+
+    <!-- Dashboard Logic -->
+    <script src="/static/dashboard.js"></script>
+
+</body>
+
+</html>

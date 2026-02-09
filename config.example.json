@@ -1,0 +1,33 @@
+{
+  "bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+  "channel_id": "YOUR_DISCORD_CHANNEL_ID_HERE",
+  "steamcmd_path": "C:\\Path\\To\\steamcmd.exe",
+  "server_dir": "C:\\Path\\To\\ARK Survival Ascended Dedicated Server",
+  "discord_webhook": "YOUR_DISCORD_WEBHOOK_URL_HERE",
+  "rcon_tool": "C:\\Path\\To\\rcon.exe",
+  "app_id": "2430930",
+  "webhook_messages": {
+    "shutdown": "Server is shutting down for maintenance.",
+    "reboot": "Server is rebooting."
+  },
+  "backup_config": {
+    "backup_path": "C:\\Path\\To\\Backups",
+    "backup_retention_count": 10,
+    "message_delete_seconds": 86400
+  },
+  "cluster_servers": [
+    {
+      "name": "island",
+      "display_name": "The Island",
+      "map_abbrev": "TI",
+      "map_name": "TheIsland_WP",
+      "rcon_ip": "127.0.0.1",
+      "rcon_port": 27015,
+      "rcon_password": "YOUR_RCON_PASSWORD",
+      "start_command": "C:\\Path\\To\\ShooterGame\\Binaries\\Win64\\start_island.bat",
+      "server_save_path": "C:\\Path\\To\\ShooterGame\\Saved\\SavedArks\\TheIsland_WP",
+      "log_dir": "C:\\Path\\To\\ShooterGame\\Saved\\Logs",
+      "server_log_path": "C:\\Path\\To\\ShooterGame\\Saved\\Logs\\ShooterGame.log"
+    }
+  ]
+}
