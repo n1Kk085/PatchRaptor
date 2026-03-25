@@ -173,28 +173,31 @@ class UpdateManagementHandler:
         
         # Build and execute SteamCMD command directly
         cmd_args = [
-            steamcmd_path,
-            "+force_install_dir", server_dir,
+            str(steamcmd_path),
+            "+force_install_dir", str(server_dir),
             "+login", "anonymous",
-            "+app_update", app_id,
-            "validate",
+            "+app_update", str(app_id), "validate",
             "+quit"
         ]
-        
+
         logger.debug_update(f"SteamCMD command: {cmd_args}")
-        result = await execute_steamcmd_simple(cmd_args)
-        
+
+        try:
+            # This is where the [Errno 22] crash actually happens
+            result = await execute_steamcmd_simple(cmd_args)
+        except OSError as e:
+            logger.error_system(f"Windows rejected the SteamCMD launch (Errno {e.errno}): {e.strerror}")
+            await self.discord_manager.send_temp_message(channel, f"❌ System Error: {e.strerror}. Check your config paths.")
+            raise UpdateError(f"OS rejected the command: {e}")
+
         logger.debug_update(f"SteamCMD execution completed, return code: {result.returncode}")
-                 
-        logger.debug_update(f"SteamCMD execution completed, return code: {result.returncode}")
+
         if result.returncode != 0:
             logger.debug_update("SteamCMD update failed, sending error notification to channel")
             logger.error_system("SteamCMD update failed")
             await self.discord_manager.send_temp_message(channel, "❌ SteamCMD update failed. Manual intervention required.")
-            raise UpdateError("SteamCMD update failed.")
+            raise UpdateError("SteamCMD update failed.")    
         
-        logger.debug_update("SteamCMD update completed successfully")
-        logger.info_system("SteamCMD update completed successfully")
         
         # Save new version
         logger.debug_update("Starting version information update process")
@@ -961,9 +964,8 @@ class UpdateManagementHandler:
             if not current:
                 logger.debug_update("No current version found, setting initial version")
                 logger.info_system("No current version found, performing initial update check")
-                self.last_check_version = latest
+                self.last_check_version = "0"
                 logger.debug_update(f"Set last_check_version to: {latest}")
-                return
             
             # Check if update is needed
             if current != latest and self.last_check_version != latest:
