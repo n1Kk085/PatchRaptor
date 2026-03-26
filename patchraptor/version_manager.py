@@ -68,15 +68,26 @@ class VersionManager:
         try:
             logger.debug_update(f"Building SteamCMD command with app_id: {self.app_id}")
             cmd_args = [
-                self.steamcmd_path,
+                os.path.abspath(str(self.steamcmd_path)),
                 "+login", "anonymous",
-                "+app_info_print", self.app_id,
+                "+app_info_print", str(self.app_id),
                 "+quit"
             ]
             logger.debug_update(f"SteamCMD command args: {cmd_args}")
             logger.debug_update("Executing SteamCMD command in separate thread")
             
-            # Add timeout to prevent hanging
+            # Add window suppression flags if on Windows
+            creationflags = 0
+            if os.name == 'nt':
+                import subprocess
+                creationflags = subprocess.CREATE_NO_WINDOW
+                
+            # Try to determine CWD from the steamcmd path
+            cwd = None
+            if os.path.exists(str(self.steamcmd_path)):
+                cwd = os.path.dirname(os.path.abspath(str(self.steamcmd_path)))
+
+            # Execute with standardized flags and cwd
             try:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -86,7 +97,9 @@ class VersionManager:
                         capture_output=True,
                         text=True,
                         encoding='utf-8',
-                        errors='replace'
+                        errors='replace',
+                        creationflags=creationflags,
+                        cwd=cwd
                     ),
                     timeout=300  # 5 minute timeout
                 )

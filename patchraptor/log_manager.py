@@ -364,28 +364,51 @@ async def execute_steamcmd_simple(cmd_args):
     
     logger.info_system("Starting SteamCMD process...")
     
+    # Try to determine CWD from the steamcmd path
+    cwd = None
+    if cmd_args and os.path.exists(str(cmd_args[0])):
+        cwd = os.path.dirname(os.path.abspath(str(cmd_args[0])))
+        logger.debug_update(f"Setting SteamCMD working directory to: {cwd}")
+
     # Run subprocess in a thread to avoid blocking event loop
     def run_subprocess():
+        # Add window suppression flags if on Windows
+        import subprocess
+        creationflags = 0
+        startupinfo = None
+        if os.name == 'nt':
+            creationflags = subprocess.CREATE_NO_WINDOW
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
         return subprocess.run(
             cmd_args,
             capture_output=True,
             text=True,
-            timeout=3600  # 1 hour timeout
+            timeout=3600,  # 1 hour timeout
+            cwd=cwd,
+            creationflags=creationflags,
+            startupinfo=startupinfo
         )
     
     # Execute in thread to prevent Discord heartbeat timeouts
     result = await asyncio.to_thread(run_subprocess)
     
     # Log output after completion (SteamCMD only releases output at the end)
-    if result.stdout:
-        for line in result.stdout.strip().split('\n'):
-            if line.strip():
-                print(line, flush=True)
-    
-    if result.stderr:
-        for line in result.stderr.strip().split('\n'):
-            if line.strip():
-                print(f"ERROR: {line}", flush=True)
+    # Use a try-except for print to avoid [Errno 22] in windowed mode
+    try:
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    print(line, flush=True)
+        
+        if result.stderr:
+            for line in result.stderr.strip().split('\n'):
+                if line.strip():
+                    print(f"ERROR: {line}", flush=True)
+    except Exception:
+        # Standard logging in SimpleConsoleHandler already handles print failures
+        pass
     
     return result
 

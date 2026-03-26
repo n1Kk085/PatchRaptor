@@ -171,10 +171,10 @@ class UpdateManagementHandler:
         logger.debug_update(f"Using direct SteamCMD execution - path: {steamcmd_path}, dir: {server_dir}, app_id: {app_id}")
         logger.info_system("Executing SteamCMD update directly...")
         
-        # Build and execute SteamCMD command directly
+        # Build and execute SteamCMD command directly with standardized string conversion and absolute paths
         cmd_args = [
-            str(steamcmd_path),
-            "+force_install_dir", str(server_dir),
+            os.path.abspath(str(steamcmd_path)),
+            "+force_install_dir", os.path.abspath(str(server_dir)),
             "+login", "anonymous",
             "+app_update", str(app_id), "validate",
             "+quit"
@@ -193,10 +193,19 @@ class UpdateManagementHandler:
         logger.debug_update(f"SteamCMD execution completed, return code: {result.returncode}")
 
         if result.returncode != 0:
-            logger.debug_update("SteamCMD update failed, sending error notification to channel")
-            logger.error_system("SteamCMD update failed")
-            await self.discord_manager.send_temp_message(channel, "❌ SteamCMD update failed. Manual intervention required.")
-            raise UpdateError("SteamCMD update failed.")    
+            logger.debug_update(f"SteamCMD update failed (Code {result.returncode})")
+            logger.error_system(f"SteamCMD update failed: {result.stderr or 'No error output'}")
+            
+            # Detailed error message for Discord
+            error_details = (result.stderr or result.stdout or "No diagnostic output available").strip()
+            if len(error_details) > 300:
+                error_details = error_details[-300:] + "..." # Show last 300 chars of tail
+            
+            await self.discord_manager.send_temp_message(
+                channel, 
+                f"❌ **SteamCMD Error (Code {result.returncode}):**\n```\n{error_details}\n```"
+            )
+            raise UpdateError(f"SteamCMD update failed with code {result.returncode}")
         
         
         # Save new version
@@ -419,11 +428,12 @@ class UpdateManagementHandler:
             # Step 1: Build command as list to prevent command injection
             logger.debug_update("Building SteamCMD command for all servers")
             logger.info_system("Building SteamCMD command for all servers...")
+            # Step 1: Build command as list with absolute paths and string conversion
             cmd_args = [
-                steamcmd_path,
-                "+force_install_dir", server_dir,
+                os.path.abspath(str(steamcmd_path)),
+                "+force_install_dir", os.path.abspath(str(server_dir)),
                 "+login", "anonymous",
-                "+app_update", app_id,
+                "+app_update", str(app_id),
                 "validate",
                 "+quit"
             ]
@@ -439,9 +449,15 @@ class UpdateManagementHandler:
             
             logger.debug_update(f"SteamCMD execution completed, return code: {res.returncode}")
             if res.returncode != 0:
-                logger.debug_update("SteamCMD force update failed for all servers")
-                logger.error_system("SteamCMD force update failed for all servers")
-                await self.discord_manager.send_temp_message(message.channel, "❌ SteamCMD update failed. Manual intervention required.")
+                logger.error_system(f"SteamCMD force update failed: {res.stderr or 'No error output'}")
+                error_details = (res.stderr or res.stdout or "No output").strip()
+                if len(error_details) > 300:
+                    error_details = error_details[-300:] + "..."
+                
+                await self.discord_manager.send_temp_message(
+                    message.channel, 
+                    f"❌ **SteamCMD Error (Code {res.returncode}):**\n```\n{error_details}\n```"
+                )
                 return
             
             logger.debug_update("SteamCMD force update completed successfully for all servers")
@@ -591,10 +607,10 @@ class UpdateManagementHandler:
         logger.debug_update(f"Building SteamCMD command for server {server.name}")
         logger.info_system(f"Building SteamCMD command for {server.name}...")
         cmd_args = [
-            steamcmd_path,
-            "+force_install_dir", server.install_dir,
+            os.path.abspath(str(steamcmd_path)),
+            "+force_install_dir", os.path.abspath(str(server.install_dir)),
             "+login", "anonymous",
-            "+app_update", app_id,
+            "+app_update", str(app_id),
             "validate",
             "+quit"
         ]
@@ -609,10 +625,14 @@ class UpdateManagementHandler:
         
         logger.debug_update(f"SteamCMD execution completed for {server.name}, return code: {res.returncode}")
         if res.returncode != 0:
-            logger.debug_update(f"SteamCMD force update failed for server {server.name}")
-            logger.error_system(f"SteamCMD force update failed for {server.name}")
+            logger.error_system(f"SteamCMD force update failed for {server.name}: {res.stderr or 'No error output'}")
+            error_details = (res.stderr or res.stdout or "No output").strip()
+            if len(error_details) > 300:
+                error_details = error_details[-300:] + "..."
+            
             await self.discord_manager.send_temp_message(
-                message.channel, "❌ SteamCMD update failed. Manual intervention required."
+                message.channel, 
+                f"❌ **SteamCMD Error for {display_name} (Code {res.returncode}):**\n```\n{error_details}\n```"
             )
             return
         
