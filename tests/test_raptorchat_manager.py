@@ -111,25 +111,26 @@ class TestStop:
         """Test stop when not running."""
         assert raptorchat_manager.stop() is False
 
-    @patch('subprocess.run')
-    def test_stop_success(self, mock_run, raptorchat_manager):
+    def test_stop_success(self, raptorchat_manager):
         """Test successful stop."""
         mock_process = Mock()
         mock_process.poll.return_value = None
         raptorchat_manager.process = mock_process
         
-        # Mock sys.platform to windows for taskkill test
-        with patch('sys.platform', 'win32'):
-            assert raptorchat_manager.stop() is True
+        with patch("psutil.Process") as mock_psutil_process:
+            mock_parent = Mock()
+            mock_parent.terminate.return_value = None
+            mock_parent.wait.return_value = None
+            mock_parent.children.return_value = []
+            mock_psutil_process.return_value = mock_parent
             
-            # Verify taskkill called on Windows
-            mock_run.assert_called()
-            # Verify process.kill called
-            mock_process.kill.assert_called()
-            assert raptorchat_manager.process is None
+            assert raptorchat_manager.stop() is True
+        
+        # Verify psutil.Process.terminate called
+        mock_parent.terminate.assert_called()
+        assert raptorchat_manager.process is None
 
-    @patch('subprocess.run')
-    def test_stop_exception(self, mock_run, raptorchat_manager):
+    def test_stop_exception(self, raptorchat_manager):
         """Test stop with exception."""
         mock_process = Mock()
         mock_process.poll.return_value = None
@@ -171,42 +172,6 @@ class TestReboot:
 class TestMonitoring:
     """Test monitoring logic."""
 
-    @pytest.mark.asyncio
-    async def test_check_server_connections_not_running(self, raptorchat_manager):
-        """Test connection check when process not running."""
-        raptorchat_manager.process = None
-        assert await raptorchat_manager._check_server_connections() is False
-
-    @pytest.mark.asyncio
-    async def test_check_server_connections_no_config(self, raptorchat_manager):
-        """Test connection check with missing config."""
-        mock_process = Mock()
-        mock_process.poll.return_value = None
-        raptorchat_manager.process = mock_process
-        
-        with patch('os.path.exists', return_value=False):
-            assert await raptorchat_manager._check_server_connections() is False
-
-    @pytest.mark.asyncio
-    async def test_check_server_connections_success(self, raptorchat_manager):
-        """Test successful connection check."""
-        mock_process = Mock()
-        mock_process.poll.return_value = None
-        raptorchat_manager.process = mock_process
-        raptorchat_manager.process_start_time = 0 # OLD process
-        
-        # Mock config file open
-        with patch('os.path.exists', return_value=True), \
-             patch('builtins.open', new_callable=MagicMock) as mock_open:
-            
-            mock_file = MagicMock()
-            mock_file.__enter__.return_value.read.return_value = '{"servers": [{"name": "Server1"}]}'
-            # Proper json load mock
-            mock_open.return_value = mock_file
-            
-            # We need to patch json.load because we mocked open return value structure for simple read
-            with patch('json.load', return_value={"servers": [{"name": "Server1"}]}):
-                assert await raptorchat_manager._check_server_connections() is True
 
     @pytest.mark.asyncio
     async def test_monitor_raptorchat_loop(self, raptorchat_manager):
@@ -228,269 +193,15 @@ class TestDelayedStart:
         with patch.object(RaptorChatManager, 'start', return_value=True) as mock_start, \
              patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
             
-            await raptorchat_manager.start_delayed(delay_seconds=1)
+            task = await raptorchat_manager.start_delayed(delay_seconds=1)
+            # Cancel the task as we've verified it was created
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
             
-            # Need to yield to let the task run? 
-            # start_delayed uses create_task, so it runs in background.
-            # We can mock create_task to await it immediately for testing or just await sleep
-            pass # Testing fire-and-forget is tricky without refactoring to return task
-            
-            # Alternative: verifying start_delayed returns nothing
-            assert True
-
-class TestSetIntervals:
-    """Test setting monitoring intervals."""
-    
-    def test_set_server_monitor_interval(self, raptorchat_manager):
-        """Test setting server monitor interval."""
-        raptorchat_manager.set_server_monitor_interval(30)
-        
-        assert raptorchat_manager.server_monitor_interval == 30
-    
-    def test_set_max_monitor_duration(self, raptorchat_manager):
-        """Test setting max monitor duration."""
-        raptorchat_manager.set_max_monitor_duration(600)
-        
-        assert raptorchat_manager.max_monitor_duration == 600
-
-
-class TestStartAutoMonitor:
-    """Test auto-monitoring functionality."""
-    
-    @pytest.mark.asyncio
-    async def test_start_auto_monitor_already_running(self, raptorchat_manager):
-        """Test starting monitor when already running."""
-        # Create a mock task that's not done
-        mock_task = Mock()
-        mock_task.done = Mock(return_value=False)
-        raptorchat_manager.monitor_task = mock_task
-        
-        with patch('asyncio.create_task') as mock_create_task:
-            await raptorchat_manager.start_auto_monitor()
-            # Should not create new task
-            mock_create_task.assert_not_called()
-    
-    @pytest.mark.asyncio
-    async def test_stop_auto_monitor_with_task(self, raptorchat_manager):
-        """Test stopping active monitoring task."""
-        # Create an actual task that can be cancelled
-        async def mock_monitor():
-            try:
-                await asyncio.sleep(100)
-            except asyncio.CancelledError:
-                raise
-        
-        mock_task = asyncio.create_task(mock_monitor())
-        raptorchat_manager.monitor_task = mock_task
-        
-        await raptorchat_manager.stop_auto_monitor()
-        
-        assert raptorchat_manager.monitor_task is None
-        assert mock_task.cancelled()
-    
-    @pytest.mark.asyncio
-    async def test_stop_auto_monitor_with_server_task(self, raptorchat_manager):
-        """Test stopping server monitor task."""
-        # Create actual tasks that can be cancelled
-        async def mock_monitor():
-            try:
-                await asyncio.sleep(100)
-            except asyncio.CancelledError:
-                raise
-        
-        async def mock_server_monitor():
-            try:
-                await asyncio.sleep(100)
-            except asyncio.CancelledError:
-                raise
-        
-        mock_monitor_task = asyncio.create_task(mock_monitor())
-        mock_server_task = asyncio.create_task(mock_server_monitor())
-        
-        raptorchat_manager.monitor_task = mock_monitor_task
-        raptorchat_manager.server_monitor_task = mock_server_task
-        
-        await raptorchat_manager.stop_auto_monitor()
-        
-        assert raptorchat_manager.monitor_task is None
-        assert raptorchat_manager.server_monitor_task is None
-        assert mock_monitor_task.cancelled()
-        assert mock_server_task.cancelled()
-
-
-class TestMonitorRaptorChat:
-    """Test RaptorChat monitoring loop."""
-    
-    @pytest.mark.asyncio
-    async def test_monitor_process_check_failure(self, raptorchat_manager):
-        """Test monitoring when process check fails."""
-        # Simulate process not running
-        raptorchat_manager.process = None
-        
-        call_count = 0
-        async def mock_sleep(duration):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 2:
-                raise asyncio.CancelledError()
-        
-        with patch('asyncio.sleep', side_effect=mock_sleep):
-            try:
-                await raptorchat_manager._monitor_raptorchat()
-            except asyncio.CancelledError:
-                pass
-    
-    @pytest.mark.asyncio
-    async def test_monitor_exception_handling(self, raptorchat_manager):
-        """Test exception handling in monitoring loop."""
-        mock_process = Mock()
-        mock_process.poll.side_effect = Exception("Process check failed")
-        raptorchat_manager.process = mock_process
-        
-        call_count = 0
-        async def mock_sleep(duration):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 2:
-                raise asyncio.CancelledError()
-        
-        with patch('asyncio.sleep', side_effect=mock_sleep):
-            try:
-                await raptorchat_manager._monitor_raptorchat()
-            except asyncio.CancelledError:
-                pass
-    
-    @pytest.mark.asyncio
-    async def test_monitor_cleanup_with_returncode(self, raptorchat_manager):
-        """Test cleanup when process has return code."""
-        mock_process = Mock()
-        mock_process.poll.return_value = 1  # Process terminated
-        mock_process.returncode = 1
-        raptorchat_manager.process = mock_process
-        
-        with patch('asyncio.sleep', side_effect=asyncio.CancelledError):
-            try:
-                await raptorchat_manager._monitor_raptorchat()
-            except asyncio.CancelledError:
-                pass
-        
-        # Process should be cleaned up
-        assert raptorchat_manager.process is None
-    
-    @pytest.mark.asyncio
-    async def test_monitor_cleanup_exception(self, raptorchat_manager):
-        """Test exception during cleanup."""
-        mock_process = Mock()
-        mock_process.poll.side_effect = [None, Exception("Cleanup error")]
-        mock_process.returncode = None
-        raptorchat_manager.process = mock_process
-        
-        with patch('asyncio.sleep', side_effect=asyncio.CancelledError):
-            try:
-                await raptorchat_manager._monitor_raptorchat()
-            except asyncio.CancelledError:
-                pass
-
-
-class TestCheckServerConnections:
-    """Test server connection checking."""
-    
-    @pytest.mark.asyncio
-    async def test_check_connections_file_not_found(self, raptorchat_manager):
-        """Test when config file doesn't exist."""
-        mock_process = Mock()
-        mock_process.poll.return_value = None
-        raptorchat_manager.process = mock_process
-        
-        with patch('os.path.exists', return_value=False):
-            result = await raptorchat_manager._check_server_connections()
-            assert result is False
-    
-    @pytest.mark.asyncio
-    async def test_check_connections_json_error(self, raptorchat_manager):
-        """Test JSON parsing error."""
-        mock_process = Mock()
-        mock_process.poll.return_value = None
-        raptorchat_manager.process = mock_process
-        
-        with patch('os.path.exists', return_value=True), \
-             patch('builtins.open', MagicMock()), \
-             patch('json.load', side_effect=Exception("Invalid JSON")):
-            result = await raptorchat_manager._check_server_connections()
-            # On error, returns True to avoid unnecessary restarts
-            assert result is True
-    
-    @pytest.mark.asyncio
-    async def test_check_connections_no_servers_configured(self, raptorchat_manager):
-        """Test when no servers are configured."""
-        mock_process = Mock()
-        mock_process.poll.return_value = None
-        raptorchat_manager.process = mock_process
-        
-        with patch('os.path.exists', return_value=True), \
-             patch('builtins.open', MagicMock()), \
-             patch('json.load', return_value={"servers": []}):
-            result = await raptorchat_manager._check_server_connections()
-            assert result is True
-    
-    @pytest.mark.asyncio
-    async def test_check_connections_process_stopped(self, raptorchat_manager):
-        """Test when process stops during check."""
-        mock_process = Mock()
-        mock_process.poll.return_value = 1  # Process terminated
-        raptorchat_manager.process = mock_process
-        raptorchat_manager.process_start_time = 0
-        
-        with patch('os.path.exists', return_value=True), \
-             patch('builtins.open', MagicMock()), \
-             patch('json.load', return_value={"servers": [{"name": "Server1"}]}):
-            result = await raptorchat_manager._check_server_connections()
-            assert result is False
-    
-    @pytest.mark.asyncio
-    async def test_check_connections_new_process(self, raptorchat_manager):
-        """Test when process is new (grace period)."""
-        import time
-        mock_process = Mock()
-        mock_process.poll.return_value = None
-        raptorchat_manager.process = mock_process
-        raptorchat_manager.process_start_time = time.time()  # Just started
-        
-        with patch('os.path.exists', return_value=True), \
-             patch('builtins.open', MagicMock()), \
-             patch('json.load', return_value={"servers": [{"name": "Server1"}]}):
-            result = await raptorchat_manager._check_server_connections()
-            assert result is True
-
-
-class TestMonitorServerConnection:
-    """Test deprecated server connection monitor."""
-    
-    @pytest.mark.asyncio
-    async def test_monitor_server_connection_loop(self, raptorchat_manager):
-        """Test deprecated monitor loop."""
-        call_count = 0
-        async def mock_sleep(duration):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 2:
-                raise asyncio.CancelledError()
-        
-        with patch('asyncio.sleep', side_effect=mock_sleep):
-            try:
-                await raptorchat_manager._monitor_server_connection()
-            except asyncio.CancelledError:
-                pass
-        
-        assert call_count == 2
-    
-    @pytest.mark.asyncio
-    async def test_monitor_server_connection_exception(self, raptorchat_manager):
-        """Test exception in deprecated monitor."""
-        with patch('asyncio.sleep', side_effect=Exception("Monitor error")):
-            await raptorchat_manager._monitor_server_connection()
-            # Should handle exception gracefully
-
+            assert raptorchat_manager.delayed_start_task is not None
 
 class TestDelayedStartInternal:
     """Test delayed start internal function."""
@@ -505,8 +216,10 @@ class TestDelayedStartInternal:
             
             await raptorchat_manager.start_delayed(delay_seconds=1)
             
-            # Verify task was created
+            # Verify task was created and clean up coroutine to avoid warning
             mock_create_task.assert_called_once()
+            coro = mock_create_task.call_args[0][0]
+            await coro # Actually run it (it will sleep but we mocked sleep)
     
     @pytest.mark.asyncio
     async def test_delayed_start_with_zero_delay(self, raptorchat_manager):
@@ -518,8 +231,10 @@ class TestDelayedStartInternal:
             
             await raptorchat_manager.start_delayed(delay_seconds=0)
             
-            # Verify task was created
+            # Verify task was created and clean up coroutine
             mock_create_task.assert_called_once()
+            coro = mock_create_task.call_args[0][0]
+            await coro
 
 
 class TestRestartChatThreads:
@@ -539,9 +254,9 @@ class TestRestartChatThreads:
             # That coroutine must be awaited. But start() is synchronous and just fires it via create_task.
             # So start() basically does `asyncio.create_task(self.start_delayed())`.
             # We need start_delayed to NOT return a coroutine that needs awaiting, OR we need the loop to process it.
-            # Actually, simply returning None from the side_effect of the AsyncMock might not be enough if it's treated as a coro.
+            # Returning None from side_effect handles coroutine expectations.
             # Better: Make start_delayed a MagicMock that returns a dummy object, avoiding the "coroutine never awaited" check?
-            # No, if it's defined as async in class, it should be AsyncMock.
+            # Uses AsyncMock for async methods defined in class.
             # The issue is typically that the test ends before the loop processes the task.
             # We will try setting return_value to None explicitly.
             mock_start_delayed.return_value = None

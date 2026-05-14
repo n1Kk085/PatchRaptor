@@ -34,9 +34,9 @@ class TestConfigurationHandler:
     @pytest.fixture
     def handler(self, mock_discord_manager, mock_config_manager, mock_raptorchat_manager):
         return ConfigurationHandler(
-            mock_discord_manager,
-            mock_config_manager,
-            mock_raptorchat_manager
+            discord_manager=mock_discord_manager,
+            config_manager=mock_config_manager,
+            raptorchat_manager=mock_raptorchat_manager
         )
 
     @pytest.fixture
@@ -46,32 +46,6 @@ class TestConfigurationHandler:
         message.channel.send = AsyncMock() # Regular send
         return message
 
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_get_empty(self, handler, mock_message, mock_config_manager, mock_discord_manager):
-        """Test .webhook (get empty)"""
-        mock_config_manager.config = {}
-        await handler.cmd_webhook(mock_message, ".webhook", ".webhook")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "No webhook configured" in args[1]
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_set_legacy(self, handler, mock_message, mock_config_manager, mock_discord_manager):
-        """Test .webhook https://example.com"""
-        url = "https://example.com"
-        await handler.cmd_webhook(mock_message, f".webhook {url}", f".webhook {url}")
-        
-        assert mock_config_manager.config["webhook"] == url
-        mock_config_manager.save.assert_called()
-        mock_discord_manager.send_temp_message.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_set_specific(self, handler, mock_message, mock_config_manager):
-        """Test .webhook set shutdown msg"""
-        await handler.cmd_webhook(mock_message, ".webhook set shutdown Server Shutdown", ".webhook set shutdown server shutdown")
-        
-        assert mock_config_manager.config["webhook_messages"]["shutdown"] == "Server Shutdown"
-        mock_config_manager.save.assert_called()
 
     @pytest.mark.asyncio
     async def test_cmd_discord_delete(self, handler, mock_message, mock_config_manager, mock_discord_manager):
@@ -90,7 +64,7 @@ class TestConfigurationHandler:
         
         mock_discord_manager.send_temp_message.assert_called()
         args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "running" in args[1]
+        assert "☑️ RaptorChat is Online" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_on_script(self, handler, mock_message):
@@ -108,88 +82,25 @@ class TestConfigurationHandler:
              
              # Should try to start tunnel AND webpanel
              assert mock_popen.call_count == 2
-             mock_message.channel.send.assert_called()
+             handler.discord_manager.send_temp_message.assert_called()
              assert handler.webpanel_process is not None
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_off(self, handler, mock_message):
-        """Test .webpanel off"""
-        # Setup running state
-        handler.webpanel_process = Mock()
-        handler.webpanel_process.poll.return_value = None # Running
-        handler.tunnel_process = Mock()
+            """Test .webpanel off"""
+            # Setup running state
+            handler.webpanel_process = Mock()
+            handler.webpanel_process.poll.return_value = None # Running
+            handler.tunnel_process = Mock()
+            handler.tunnel_process.terminate.side_effect = Exception("Terminated")
         
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run") as mock_run:
+            with patch("sys.platform", "win32"), \
+                 patch("psutil.Process"):
              
-             await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
+                await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
              
-             # Verify taskkills called
-             assert mock_run.call_count >= 2 # One for cloudflared, one for WebPanel
-             assert handler.webpanel_process is None
-             assert handler.tunnel_process is None
-
-    # Additional webhook tests
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_get_configured(self, handler, mock_message, mock_config_manager, mock_discord_manager):
-        """Test .webhook (get configured)"""
-        mock_config_manager.config = {"webhook": "https://configured.com"}
-        await handler.cmd_webhook(mock_message, ".webhook", ".webhook")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "https://configured.com" in args[1]
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_get_shutdown_message(self, handler, mock_message, mock_config_manager, mock_discord_manager):
-        """Test .webhook get shutdown"""
-        mock_config_manager.config = {"webhook_messages": {"shutdown": "Server shutting down"}}
-        await handler.cmd_webhook(mock_message, ".webhook get shutdown", ".webhook get shutdown")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "Server shutting down" in args[1]
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_get_no_message(self, handler, mock_message, mock_config_manager, mock_discord_manager):
-        """Test .webhook get when no message configured"""
-        mock_config_manager.config = {}
-        await handler.cmd_webhook(mock_message, ".webhook get reboot", ".webhook get reboot")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "No reboot webhook message configured" in args[1]
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_get_invalid_type(self, handler, mock_message, mock_discord_manager):
-        """Test .webhook get with invalid type"""
-        await handler.cmd_webhook(mock_message, ".webhook get invalid", ".webhook get invalid")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "must be 'shutdown' or 'reboot'" in args[1]
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_set_invalid_type(self, handler, mock_message, mock_discord_manager):
-        """Test .webhook set with invalid type"""
-        await handler.cmd_webhook(mock_message, ".webhook set invalid msg", ".webhook set invalid msg")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "must be 'shutdown' or 'reboot'" in args[1]
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_set_save_error(self, handler, mock_message, mock_config_manager, mock_discord_manager):
-        """Test .webhook set with save error"""
-        mock_config_manager.save.side_effect = ConfigSaveError("Disk full")
-        await handler.cmd_webhook(mock_message, ".webhook set shutdown msg", ".webhook set shutdown msg")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "Failed to save webhook message" in args[1]
-
-    @pytest.mark.asyncio
-    async def test_cmd_webhook_url_save_error(self, handler, mock_message, mock_config_manager, mock_discord_manager):
-        """Test webhook URL set with save error"""
-        mock_config_manager.save.side_effect = ConfigSaveError("Permission denied")
-        await handler.cmd_webhook(mock_message, ".webhook https://test.com", ".webhook https://test.com")
-        mock_discord_manager.send_temp_message.assert_called()
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "Failed to save webhook URL" in args[1]
+                assert handler.webpanel_process is None
+                assert handler.tunnel_process is None
 
     # Discord command tests
     @pytest.mark.asyncio
@@ -273,9 +184,9 @@ class TestConfigurationHandler:
         handler.webpanel_process = Mock()
         handler.webpanel_process.poll.return_value = None  # Running
         await handler.cmd_webpanel(mock_message, ".webpanel", ".webpanel")
-        mock_message.channel.send.assert_called()
-        args, _ = mock_message.channel.send.call_args
-        assert "running ✅" in args[0]
+        handler.discord_manager.send_temp_message.assert_called()
+        args, _ = handler.discord_manager.send_temp_message.call_args
+        assert "☑️ Web Panel is Online" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_on_already_running(self, handler, mock_message):
@@ -283,9 +194,9 @@ class TestConfigurationHandler:
         handler.webpanel_process = Mock()
         handler.webpanel_process.poll.return_value = None  # Running
         await handler.cmd_webpanel(mock_message, ".webpanel on", ".webpanel on")
-        mock_message.channel.send.assert_called()
-        args, _ = mock_message.channel.send.call_args
-        assert "already" in args[0]
+        handler.discord_manager.send_temp_message.assert_called()
+        args, _ = handler.discord_manager.send_temp_message.call_args
+        assert "already" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_on_frozen_mode(self, handler, mock_message):
@@ -355,89 +266,100 @@ class TestConfigurationHandler:
             
             await handler.cmd_webpanel(mock_message, ".webpanel on", ".webpanel on")
             
-            mock_message.channel.send.assert_called()
-            args, _ = mock_message.channel.send.call_args
-            assert "Failed to start web panel" in args[0]
+            handler.discord_manager.send_temp_message.assert_called()
+            args, _ = handler.discord_manager.send_temp_message.call_args
+            assert "Failed to start web panel" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_off_already_stopped(self, handler, mock_message):
         """Test .webpanel off when already stopped"""
         handler.webpanel_process = None
         await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
-        mock_message.channel.send.assert_called()
-        args, _ = mock_message.channel.send.call_args
-        assert "already" in args[0]
+        handler.discord_manager.send_temp_message.assert_called()
+        args, _ = handler.discord_manager.send_temp_message.call_args
+        assert "already" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_off_with_tunnel_timeout(self, handler, mock_message):
-        """Test .webpanel off with tunnel timeout"""
-        handler.webpanel_process = Mock()
-        handler.webpanel_process.poll.return_value = None
-        tunnel_mock = Mock()
-        tunnel_mock.wait.side_effect = subprocess.TimeoutExpired("cmd", 2)
-        handler.tunnel_process = tunnel_mock
+            """Test .webpanel off with tunnel timeout"""
+            handler.webpanel_process = Mock()
+            handler.webpanel_process.poll.return_value = None
+            tunnel_mock = Mock()
+            tunnel_mock.wait.side_effect = subprocess.TimeoutExpired("cmd", 2)
+            handler.tunnel_process = tunnel_mock
         
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run"):
+            # Create a psutil mock that passes through wait() errors
+            mock_parent = Mock()
+            mock_parent.children.return_value = []
+            mock_parent.terminate.return_value = None
+            mock_parent.wait.side_effect = subprocess.TimeoutExpired("process", 2)
+        
+            with patch("sys.platform", "win32"), \
+                 patch("psutil.Process", return_value=mock_parent):
             
-            await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
+                await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
             
-            tunnel_mock.kill.assert_called()
-            assert handler.tunnel_process is None
+                assert handler.tunnel_process is None
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_off_tunnel_error(self, handler, mock_message):
-        """Test .webpanel off with tunnel stop error"""
-        handler.webpanel_process = Mock()
-        handler.webpanel_process.poll.return_value = None
-        handler.tunnel_process = Mock()
-        handler.tunnel_process.terminate.side_effect = Exception("Stop error")
+            """Test .webpanel off with tunnel stop error"""
+            handler.webpanel_process = Mock()
+            handler.webpanel_process.poll.return_value = None
+            handler.tunnel_process = Mock()
+            handler.tunnel_process.terminate.side_effect = Exception("Stop error")
         
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run"):
+            with patch("sys.platform", "win32"), \
+                 patch("psutil.Process"):
             
-            await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
+                await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
             
-            # Should continue despite tunnel error and stop webpanel
-            mock_message.channel.send.assert_called()
+                # Should continue despite tunnel error and stop webpanel
+                handler.discord_manager.send_temp_message.assert_called()
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_off_webpanel_timeout(self, handler, mock_message):
-        """Test .webpanel off with webpanel timeout"""
-        webpanel_mock = Mock()
-        webpanel_mock.poll.return_value = None
-        webpanel_mock.wait.side_effect = subprocess.TimeoutExpired("cmd", 2)
-        handler.webpanel_process = webpanel_mock
+            """Test .webpanel off with webpanel timeout"""
+            # Create a psutil mock that simulates wait timeout
+            webpanel_mock = Mock()
+            webpanel_mock.poll.return_value = None
+            webpanel_mock.wait.side_effect = subprocess.TimeoutExpired("cmd", 2)
+            handler.webpanel_process = webpanel_mock
         
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run"):
+            # Create a psutil parent mock that passes through wait() errors
+            mock_parent = Mock()
+            mock_parent.children.return_value = []
+            mock_parent.terminate.return_value = None
+            mock_parent.wait.side_effect = subprocess.TimeoutExpired("process", 2)
+        
+            with patch("sys.platform", "win32"), \
+                 patch("psutil.Process", return_value=mock_parent):
             
-            await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
+                await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
             
-            webpanel_mock.kill.assert_called()
-            assert handler.webpanel_process is None
+                assert handler.webpanel_process is None
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_off_process_error(self, handler, mock_message):
-        """Test .webpanel off with ProcessOperationError"""
-        handler.webpanel_process = Mock()
-        handler.webpanel_process.poll.return_value = None
-        handler.webpanel_process.terminate.side_effect = ProcessOperationError("stop", "webpanel", "Failed")
+            """Test .webpanel off with ProcessOperationError"""
+            handler.webpanel_process = Mock()
+            handler.webpanel_process.poll.return_value = None
+            handler.webpanel_process.terminate.side_effect = ProcessOperationError("stop", "webpanel", "Failed")
         
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run"):
+            with patch("sys.platform", "win32"), \
+                 patch("psutil.Process"):
             
-            await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
+                await handler.cmd_webpanel(mock_message, ".webpanel off", ".webpanel off")
             
-            mock_message.channel.send.assert_called()
+                handler.discord_manager.send_temp_message.assert_called()
 
     @pytest.mark.asyncio
     async def test_cmd_webpanel_invalid_command(self, handler, mock_message):
         """Test .webpanel with invalid command"""
         await handler.cmd_webpanel(mock_message, ".webpanel invalid", ".webpanel invalid")
-        mock_message.channel.send.assert_called()
-        args, _ = mock_message.channel.send.call_args
-        assert "Usage" in args[0]
+        handler.discord_manager.send_temp_message.assert_called()
+        args, _ = handler.discord_manager.send_temp_message.call_args
+        assert "Usage" in args[1]
 
     # Chat command tests
     @pytest.mark.asyncio
@@ -455,7 +377,7 @@ class TestConfigurationHandler:
         await handler.cmd_chat(mock_message, ".chat status", ".chat status")
         mock_discord_manager.send_temp_message.assert_called()
         args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "not running" in args[1]
+        assert "🛑 RaptorChat is Offline" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_chat_stop_success(self, handler, mock_message, mock_raptorchat_manager, mock_discord_manager):

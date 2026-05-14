@@ -2,6 +2,8 @@
 REM PatchRaptor Test Runner with Coverage
 REM Runs all tests and generates HTML coverage report
 
+cd %~dp0..
+
 echo ========================================
 echo PatchRaptor Test Suite (with Coverage)
 echo ========================================
@@ -13,7 +15,7 @@ if errorlevel 1 (
     echo ERROR: pytest is not installed
     echo.
     echo Please install test dependencies first:
-    echo   pip install -r requirements-dev.txt
+    echo   pip install -r tests\requirements-dev.txt
     echo.
     pause
     exit /b 1
@@ -25,7 +27,7 @@ if errorlevel 1 (
     echo ERROR: pytest-cov is not installed
     echo.
     echo Please install test dependencies first:
-    echo   pip install -r requirements-dev.txt
+    echo   pip install -r tests\requirements-dev.txt
     echo.
     pause
     exit /b 1
@@ -35,7 +37,7 @@ echo Running tests with coverage analysis...
 echo.
 
 REM Run pytest with coverage
-python -m pytest --cov=patchraptor --cov-report=html --cov-report=term -v
+python -m pytest -c tests\pytest.ini --cov=patchraptor --cov-report=html --cov-report=term -v
 
 echo.
 echo ========================================

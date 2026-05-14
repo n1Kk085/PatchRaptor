@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function initDashboard() {
     fetchUserInfo();
     fetchData();
-    setInterval(fetchData, 30000); // 30s poll
+    setInterval(fetchData, 10000); // 10s poll
 }
 
 async function fetchUserInfo() {
@@ -48,7 +48,7 @@ function updateDashboard(data) {
     updateElement('last-update', data.lastUpdate ? new Date(data.lastUpdate).toLocaleTimeString() : 'Never');
     updateElement('last-update-header', data.lastUpdate ? new Date(data.lastUpdate).toLocaleTimeString() : 'Never');
 
-    // 2. Render Server List
+    // 2. Render/Update Server List
     const container = document.getElementById('server-list-container');
     if (!container) return;
 
@@ -57,25 +57,78 @@ function updateDashboard(data) {
         return;
     }
 
-    container.innerHTML = data.servers.map(server => createServerCard(server)).join('');
+    // Remove "No servers" message if it exists
+    if (container.children.length === 1 && container.children[0].style.textAlign === 'center') {
+        container.innerHTML = '';
+    }
+
+    const currentServerIds = data.servers.map(s => `server-card-${s.name}`);
+
+    // Update or Create cards
+    data.servers.forEach(server => {
+        const cardId = `server-card-${server.name}`;
+        let card = document.getElementById(cardId);
+        
+        if (!card) {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = createServerCard(server, cardId);
+            container.appendChild(tempDiv.firstElementChild);
+        } else {
+            updateServerCardContent(card, server);
+        }
+    });
+
+    // Remove stale cards
+    Array.from(container.children).forEach(child => {
+        if (child.id && child.id.startsWith('server-card-') && !currentServerIds.includes(child.id)) {
+            container.removeChild(child);
+        }
+    });
 }
 
 function updateElement(id, value) {
     const el = document.getElementById(id);
-    if (el) el.textContent = value;
+    if (el && el.textContent !== String(value)) {
+        el.textContent = value;
+    }
 }
 
-function createServerCard(server) {
+function updateServerCardContent(card, server) {
+    // Only update if values actually changed to minimize DOM thrashing
+    const pCountEl = card.querySelector('.val-pcount');
+    if (pCountEl) pCountEl.textContent = server.playerCount;
+
+    const statusEl = card.querySelector('.server-status');
+    const statusTextEl = card.querySelector('.val-statustext');
+    const statusText = server.status === 'online' ? 'ONLINE' : 'OFFLINE';
+    if (statusEl) {
+        statusEl.className = `server-status ${server.status === 'online' ? 'status-online' : 'status-offline'}`;
+    }
+    if (statusTextEl) {
+        statusTextEl.textContent = statusText;
+    }
+
+    const cpuEl = card.querySelector('.val-cpu');
+    if (cpuEl) cpuEl.textContent = `${(server.cpu || 0).toFixed(1)}%`;
+
+    const ramEl = card.querySelector('.val-ram');
+    if (ramEl) ramEl.textContent = `${(server.ram || 0).toFixed(1)} GB`;
+
+    const uptimeEl = card.querySelector('.val-uptime');
+    if (uptimeEl) uptimeEl.textContent = `${(server.uptime7day || 0).toFixed(1)}%`;
+
+    const avgEl = card.querySelector('.val-avg');
+    if (avgEl) avgEl.textContent = (server.playerAvg7day || 0).toFixed(1);
+}
+
+function createServerCard(server, cardId) {
     const statusClass = server.status === 'online' ? 'status-online' : 'status-offline';
     const statusText = server.status === 'online' ? 'ONLINE' : 'OFFLINE';
     const mapImage = server.mapimage || '/static/maps/default.jpg';
-
-    // Using inline styles/classes compatible with the new style.css
-    // Sanitize server name to prevent XSS
     const safeName = escapeHtml(server.displayName || server.name);
 
     return `
-    <div class="server-card">
+    <div class="server-card" id="${cardId}">
         <div class="server-header" style="background-image: url('${mapImage}');">
             <div class="server-overlay">
                 <div class="server-top">
@@ -87,12 +140,12 @@ function createServerCard(server) {
                             <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
                             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                         </svg>
-                        ${server.playerCount}
+                        <span class="val-pcount">${server.playerCount}</span>
                     </div>
                 </div>
                 <div class="server-bottom">
                     <div class="server-status ${statusClass}">
-                        <span class="dot"></span> ${statusText}
+                        <span class="dot"></span> <span class="val-statustext">${statusText}</span>
                     </div>
                 </div>
             </div>
@@ -101,19 +154,19 @@ function createServerCard(server) {
         <div class="server-stats-grid">
             <div class="stat-item">
                 <span class="stat-label">CPU</span>
-                <span class="stat-val text-orange">${(server.cpu || 0).toFixed(1)}%</span>
+                <span class="stat-val text-orange val-cpu">${(server.cpu || 0).toFixed(1)}%</span>
             </div>
             <div class="stat-item">
                 <span class="stat-label">RAM</span>
-                <span class="stat-val text-blue">${(server.ram || 0).toFixed(1)} GB</span>
+                <span class="stat-val text-blue val-ram">${(server.ram || 0).toFixed(1)} GB</span>
             </div>
             <div class="stat-item">
                 <span class="stat-label">Uptime</span>
-                <span class="stat-val text-green">${(server.uptime7day || 0).toFixed(1)}%</span>
+                <span class="stat-val text-purple val-uptime">${(server.uptime7day || 0).toFixed(1)}%</span>
             </div>
             <div class="stat-item">
                 <span class="stat-label">7d Avg</span>
-                <span class="stat-val text-purple">${(server.server7dayAvg || 0).toFixed(1)}</span>
+                <span class="stat-val text-yellow val-avg">${(server.playerAvg7day || 0).toFixed(1)}</span>
             </div>
         </div>
     </div>
@@ -129,3 +182,4 @@ function escapeHtml(text) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 }
+

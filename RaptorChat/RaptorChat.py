@@ -1,23 +1,20 @@
+import os
+import sys
 import argparse
 import datetime
 import json
 import logging
-import os
 import re
 import subprocess
-import sys
 import threading
 import time
 from threading import Event
 
 # Allow importing patchraptor modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from patchraptor import log_utils
+from patchraptor import ark_log_utils as log_utils
 
 
-# -----------------------
-# Config
-# -----------------------
 # -----------------------
 # Config
 # -----------------------
@@ -28,38 +25,79 @@ args, _ = parser.parse_known_args()
 config_path = args.config
 if not config_path:
     # Fallback checks
-    if os.path.exists("config.json"):
-        config_path = "config.json"
-    elif os.path.exists("../config.json"):
-        config_path = "../config.json"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidate_paths = [
+        os.path.join(script_dir, "config.json"),
+        os.path.join(script_dir, "..", "config.json"),
+        os.path.join(os.getcwd(), "config.json"),
+    ]
+    for candidate in candidate_paths:
+        if os.path.exists(candidate):
+            config_path = candidate
+            break
     else:
-        # Last ditch: try to find it in the current working directory if it's not the script dir
-        cwd_config = os.path.join(os.getcwd(), "config.json")
-        if os.path.exists(cwd_config):
-            config_path = cwd_config
-        else:
-            print("ERROR: Could not find config.json")
-            sys.exit(1)
+        print("ERROR: Could not find config.json")
+        sys.exit(1)
 
+config_path = os.path.abspath(config_path)
 with open(config_path, "r", encoding="utf-8") as f:
     config = json.load(f)
 
 RCON_CLI_PATH = config.get("rcon_tool", "")
 
-# Support both "cluster_servers" (main app) and "servers" (legacy chat2)
+# Support both "cluster_servers" (main app) and "servers"
 if "cluster_servers" in config:
     SERVERS = config["cluster_servers"]
 else:
     SERVERS = config.get("servers", [])
 
+# Deduplicate servers by name to prevent multiple threads for same server
+seen_server_names = set()
+unique_servers = []
+for s in SERVERS:
+    s_name = s.get("name")
+    if s_name and s_name not in seen_server_names:
+        unique_servers.append(s)
+        seen_server_names.add(s_name)
+
+# Overwrite SERVERS with unique_servers for the rest of the script
+SERVERS = unique_servers
+
+# Ephemeral log-follower state stored on server dicts — must not persist in config.json.
+# If saved/reloaded, "_raptorchat_ever_attached" survives while timestamps do not, so the first
+# open after startup wrongly logs "reconnected" instead of "started monitoring".
+_RAPTORCHAT_RUNTIME_KEYS = ("_raptorchat_ever_attached", "_last_chat_attach_time")
+
+for _srv in SERVERS:
+    for _k in _RAPTORCHAT_RUNTIME_KEYS:
+        _srv.pop(_k, None)
+
+
+def _stash_raptorchat_runtime_keys():
+    """Temporarily remove runtime-only keys so json.dump does not persist them."""
+    stashed = []
+    for s in SERVERS:
+        stash = {}
+        for k in _RAPTORCHAT_RUNTIME_KEYS:
+            if k in s:
+                stash[k] = s.pop(k)
+        stashed.append(stash)
+    return stashed
+
+
+def _restore_raptorchat_runtime_keys(stashed):
+    for s, stash in zip(SERVERS, stashed):
+        s.update(stash)
+
+
 # -----------------------
-# Logging (identical pattern to pr1.py)
+# Logging
 # -----------------------
 LOG_PATH = "logs"
 
 
 class LogManager:
-    """Centralized logging management (copied from pr1.py)"""
+    """Centralized logging management"""
 
     def __init__(self):
         self.last_cleanup_date = None
@@ -68,18 +106,20 @@ class LogManager:
     def _setup_logging(self):
         os.makedirs(LOG_PATH, exist_ok=True)
         
-        # Clear any existing handlers
-        logging.basicConfig(handlers=[])
+        # Get root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
         
+        # Clear any existing handlers to prevent duplicates
+        while root_logger.handlers:
+            root_logger.removeHandler(root_logger.handlers[0])
+            
         # Set up console handler
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_formatter = logging.Formatter('%(asctime)s|%(levelname)s|%(message)s', datefmt='%d-%m-%y %H:%M:%S')
         console_handler.setFormatter(console_formatter)
         
-        # Get root logger and configure it
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
         root_logger.addHandler(console_handler)
         
         # Prevent propagation to avoid duplicate logs
@@ -163,7 +203,6 @@ shutdown_event = Event()
 log_threads = []
 
 
-
 # -----------------------
 # Multi-server RCON wrapper with retry logic
 # -----------------------
@@ -177,35 +216,43 @@ class MultiRCON:
             logger.log(f"Server {server_name} not found", "ERROR")
             return False
 
-        # Support both 'rcon_ip' (main app) and 'rcon_host' (legacy)
+        # Support both 'rcon_ip' (main app) and 'rcon_host'
         rcon_ip = server.get("rcon_ip", server.get("rcon_host"))
         if not rcon_ip:
-             logger.log(f"No RCON IP/Host found for server {server_name}", "ERROR")
-             return False
+            logger.log(f"No RCON IP/Host found for server {server_name}", "ERROR")
+            return False
 
-        cmd = (
-            f'"{RCON_CLI_PATH}" ip={rcon_ip} port={server["rcon_port"]} '
-            f'pwd={server["rcon_password"]} cmd="ServerChat {message}"'
-        )
+        args = [
+            RCON_CLI_PATH,
+            f"ip={rcon_ip}",
+            f"port={server['rcon_port']}",
+            f"pwd={server['rcon_password']}",
+            f"cmd=ServerChat {message}",
+        ]
 
         for attempt in range(retries):
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
                 if result.returncode == 0:
                     return True
-                else:
-                    if attempt < retries - 1:
-                        logger.log(
-                            f"RCON attempt {attempt + 1} failed for {server_name}, retrying...",
-                            "WARNING",
-                        )
-                        time.sleep(2 ** attempt)
-                    else:
-                        logger.log(
-                            f"RCON failed for {server_name} after {retries} attempts: {result.stderr.strip()}",
-                            "ERROR",
-                        )
-                        return False
+                if attempt < retries - 1:
+                    logger.log(
+                        f"RCON attempt {attempt + 1} failed for {server_name}, retrying...",
+                        "WARNING",
+                    )
+                    time.sleep(2 ** attempt)
+                    continue
+
+                logger.log(
+                    f"RCON failed for {server_name} after {retries} attempts: {result.stderr.strip()}",
+                    "ERROR",
+                )
+                return False
             except Exception as e:
                 if attempt < retries - 1:
                     logger.log(
@@ -213,12 +260,13 @@ class MultiRCON:
                         "WARNING",
                     )
                     time.sleep(2 ** attempt)
-                else:
-                    logger.log(
-                        f"RCON error for {server_name} after {retries} attempts: {e}",
-                        "ERROR",
-                    )
-                    return False
+                    continue
+
+                logger.log(
+                    f"RCON error for {server_name} after {retries} attempts: {e}",
+                    "ERROR",
+                )
+                return False
         return False
 
 
@@ -242,6 +290,20 @@ def extract_player_and_message(line):
         return player_name, message
 
     return None, None
+
+
+def _announce_log_attachment(server: dict, server_name: str, log_basename: str) -> None:
+    """Track attachment times. Startup is summarized once in main; first open here is silent at INFO."""
+    current_time = time.time()
+    if not server.get("_raptorchat_ever_attached"):
+        server["_raptorchat_ever_attached"] = True
+        server["_last_chat_attach_time"] = current_time
+        return
+    if current_time - server.get("_last_chat_attach_time", 0) > 10:
+        logger.log(f"RaptorChat has reconnected to {server_name} successfully...", "INFO")
+        server["_last_chat_attach_time"] = current_time
+    else:
+        logger.log(f"Opened log file for {server_name}: {log_basename}", "DEBUG")
 
 
 # -----------------------
@@ -289,7 +351,12 @@ def follow_log(server):
                         # Always seek to end on first open to avoid processing old chat
                         file_handle.seek(0, 2)
                         file_pos = file_handle.tell()
-                        logger.log(f"Opened log file for {server_name}: {os.path.basename(current_log_file)}", "DEBUG")
+                        
+                        _announce_log_attachment(
+                            server,
+                            server_name,
+                            os.path.basename(current_log_file),
+                        )
                     except Exception as e:
                         logger.log(f"Error opening log file {current_log_file}: {e}", "ERROR")
                         time.sleep(5)
@@ -299,17 +366,17 @@ def follow_log(server):
                     time.sleep(5)
                     continue
 
-            # 2. Check for rotation / restart (The "Smart" Check)
+            # 2. Check for rotation / restart
             try:
                 current_size = os.path.getsize(current_log_file)
                 if current_size < file_pos:
-                    logger.log(f"Log rotation detected for {server_name} (Size: {current_size} < Pos: {file_pos})", "INFO")
+                    logger.log(f"Log rotation detected for {server_name}", "DEBUG")
                     # Close handle to force re-open
                     file_handle.close()
                     file_handle = None
                     file_pos = 0
                     
-                    # Re-scan immediately to find new file (server might have renamed old one and created new one)
+                    # Re-scan immediately to detect new log file created during rotation.
                     found_log = log_utils.find_matching_log_file(current_config, log_utils.get_logs_directory(SERVERS), logger=logger)
                     if found_log:
                         current_log_file = found_log
@@ -389,6 +456,11 @@ def handle_line(server, line):
 # -----------------------
 # Status monitoring
 # -----------------------
+def _raptorchat_online_message() -> str:
+    """Unified INFO line when follower threads are healthy."""
+    return f"RaptorChat is online and connected to {len(SERVERS)} servers..."
+
+
 def status_loop():
     """Status monitoring loop that checks for issues"""
     # Initial delay to let threads start up
@@ -412,7 +484,7 @@ def status_loop():
                 elif alive_count < len(SERVERS):
                     logger.log(f"Warning: Only {alive_count} of {len(SERVERS)} log threads are active", "WARNING")
                 else:
-                    logger.log(f"All {alive_count} log threads are active and running", "INFO")
+                    logger.log(_raptorchat_online_message(), "INFO")
                 last_status = current_status
             
             # Check if RCON tool exists
@@ -519,19 +591,23 @@ def update_server_log_files():
         # Save config if updates were made
         if updates_made:
             try:
-                with open("config.json", "w", encoding="utf-8") as f:
-                    # Update parameters are already in the SERVERS list reference (which points to config object)
-                    # We just need to dump the config object.
-                    # Explicitly ensuring the correct key is updated if we were using a disconnected list
-                    if "cluster_servers" in config:
-                        config["cluster_servers"] = SERVERS
-                    else:
-                        config["servers"] = SERVERS
-                    
-                    json.dump(config, f, indent=2)
+                stashed_rt = _stash_raptorchat_runtime_keys()
+                try:
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        # Update parameters are already in the SERVERS list reference (which points to config object)
+                        # We just need to dump the config object.
+                        # Explicitly ensuring the correct key is updated if we were using a disconnected list
+                        if "cluster_servers" in config:
+                            config["cluster_servers"] = SERVERS
+                        else:
+                            config["servers"] = SERVERS
+
+                        json.dump(config, f, indent=2)
+                finally:
+                    _restore_raptorchat_runtime_keys(stashed_rt)
                 logger.log("Dynamic log file detection completed", "INFO")
             except Exception as e:
-                logger.log(f"Failed to update config.json: {e}", "ERROR")
+                logger.log(f"Failed to update config file at {config_path}: {e}", "ERROR")
         
         return updates_made
         
@@ -548,8 +624,8 @@ if __name__ == "__main__":
         # Initialize RCON and start monitoring
         
         rcon = MultiRCON(SERVERS)
-        logger.log(f"Starting chat monitoring for {len(SERVERS)} servers", "INFO")
-        
+        logger.log(f"Starting chat monitoring for {len(SERVERS)} servers...", "INFO")
+
         # Always run detection on startup to resolve log_dir -> log_file
         update_server_log_files()
         
@@ -572,10 +648,8 @@ if __name__ == "__main__":
             )
             t.start()
             log_threads.append(t)
-        
-        # Verify all threads are running
-        running_threads = sum(1 for t in log_threads if t.is_alive())
-        logger.log(f"All {running_threads} log threads are active and running", "INFO")
+
+        logger.log(_raptorchat_online_message(), "INFO")
 
         try:
             # Keep the main thread alive
@@ -616,4 +690,3 @@ if __name__ == "__main__":
         logger.log(f"Fatal error: {e}\n{traceback.format_exc()}", "ERROR")
         shutdown_event.set()
         sys.exit(1)
-{{ ... }}

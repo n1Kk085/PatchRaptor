@@ -1,5 +1,8 @@
 from typing import List, Optional
 import psutil
+import json
+import os
+import sys
 from .models import ServerConfig
 from .exceptions import (
     ServerError,
@@ -23,6 +26,10 @@ class ServerManager:
                 self.server_lookup[srv.map_name.lower()] = srv
             if srv.display_name:
                 self.server_lookup[srv.display_name.lower()] = srv
+        
+        # PID Tracking (Phase 2 Hardening)
+        self.pids: dict[str, int] = {}
+        self._load_pids()
 
     def find_server(self, identifier: str) -> ServerConfig:
         from .log_manager import logger
@@ -37,54 +44,60 @@ class ServerManager:
         return server
 
     def get_display_name(self, server: ServerConfig) -> str:
-        from .log_manager import logger
         display_name = server.display_name or server.name
-        logger.debug_server(f"Display name for {server.name}: '{display_name}'")
         return display_name
 
-    def is_server_running(self) -> Optional[psutil.Process]:
-        """Check if any ARK server process is running"""
-        from .log_manager import logger
-        logger.debug_server("Checking for ARK server processes...")
-        
-        try:
-            ark_processes_found = 0
-            for proc in psutil.process_iter(attrs=["name", "exe", "cmdline"]):
-                proc_info = proc.info
-                proc_name = proc_info.get("name", "") or ""
-                proc_exe = proc_info.get("exe", "") or ""
-                cmdline = proc_info.get("cmdline", []) or []
-                
-                # Convert to lowercase safely
-                proc_name = proc_name.lower()
-                proc_exe = proc_exe.lower()
-                
-                # Multiple ways to identify ARK server processes
-                is_ark_process = (
-                    proc_name == "arkascendedserver.exe" or
-                    "arkascendedserver" in proc_name or
-                    "ark" in proc_exe and "server" in proc_exe or
-                    any("ark" in arg.lower() for arg in cmdline)
-                )
-                
-                if is_ark_process:
-                    ark_processes_found += 1
-                    logger.debug_server(f"ARK process found: PID {proc.pid} ({proc_name})")
-                    return proc
-            
-            logger.debug_server(f"No ARK processes found (scanned all processes)")
-            
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            # These are expected exceptions when processes disappear during iteration
-            pass
-        except psutil.Error as e:
-            from .log_manager import logger
-            logger.error_system(f"Unexpected psutil error: {e}")
-            raise ProcessOperationError("monitor", "ARK server", str(e))
-        return None
+    def _get_pid_file(self) -> str:
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.abspath(".")
+        return os.path.join(base_dir, ".pids")
 
-    def is_specific_server_running(self, server: ServerConfig) -> bool:
-        """Check if a specific server is running using multiple identification methods"""
+    def _load_pids(self):
+        pid_file = self._get_pid_file()
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, 'r') as f:
+                    self.pids = json.load(f)
+            except Exception:
+                self.pids = {}
+
+    def _save_pids(self):
+        pid_file = self._get_pid_file()
+        try:
+            with open(pid_file, 'w') as f:
+                json.dump(self.pids, f)
+        except Exception:
+            pass
+
+    def get_running_process(self, server: ServerConfig) -> Optional[psutil.Process]:
+        """Get the actual psutil.Process object for a server if it's running."""
+        # Primary: Check tracked PID
+        tracked_pid = self.pids.get(server.name)
+        if tracked_pid and isinstance(tracked_pid, (int, float)):
+            try:
+                proc = psutil.Process(int(tracked_pid))
+                if proc.is_running():
+                    # Double-check it's still an ARK process (PIDs can be reused)
+                    try:
+                        cmdline = " ".join(proc.cmdline()).lower()
+                        if server.name.lower() in cmdline or (server.map_name and server.map_name.lower() in cmdline):
+                            return proc
+                    except psutil.AccessDenied:
+                        # Fallback for Zombie process where cmdline is denied but name is visible
+                        proc_name = proc.name().lower()
+                        if "arkascendedserver" in proc_name or "shootergameserver" in proc_name or "ark" in proc_name:
+                            from .log_manager import logger
+                            logger.warning_system(f"Ghost Recovery fallback: cmdline denied for PID {tracked_pid}, relying on process name '{proc_name}'")
+                            return proc
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # PID no longer valid
+                if server.name in self.pids:
+                    del self.pids[server.name]
+                    self._save_pids()
+
+        # Fallback: Discovery
         identifiers = [
             server.map_name.lower() if server.map_name else "",
             server.name.lower(),
@@ -93,198 +106,162 @@ class ServerManager:
         
         try:
             for proc in psutil.process_iter(attrs=["name", "exe", "cmdline", "cwd"]):
-                proc_info = proc.info
-                proc_name = proc_info.get("name", "") or ""
-                proc_exe = proc_info.get("exe", "") or ""
-                proc_cwd = proc_info.get("cwd", "") or ""
-                cmdline = proc_info.get("cmdline", []) or []
+                pinfo = proc.info
+                p_name = (pinfo.get("name") or "").lower()
+                p_exe = (pinfo.get("exe") or "").lower()
+                p_cwd = (pinfo.get("cwd") or "").lower()
+                cmdline_list = pinfo.get("cmdline") or []
+                cmdline_str = " ".join(cmdline_list).lower()
                 
-                # Convert to lowercase safely
-                proc_name = proc_name.lower()
-                proc_exe = proc_exe.lower()
-                proc_cwd = proc_cwd.lower()
-                
-                # First, verify it's an ARK server process
-                is_ark_process = (
-                    proc_name == "arkascendedserver.exe" or
-                    "arkascendedserver" in proc_name or
-                    "ark" in proc_exe and "server" in proc_exe
-                )
-                
-                if not is_ark_process:
+                # Verify it's an ARK server process
+                is_ark = "arkascendedserver" in p_name or "shootergameserver" in p_name or "ark" in p_exe
+                if not is_ark:
                     continue
                 
-                # Multiple matching strategies for server identification
-                for ident in identifiers:
-                    if not ident:
-                        continue
-                    
-                    # Strategy 1: Check command line arguments for exact matches
-                    cmdline_str = " ".join(cmdline).lower()
-                    if ident in cmdline_str:
-                        # More specific validation - ensure it's not a partial match
-                        if self._is_valid_server_match(cmdline_str, ident):
-                            return True
-                    
-                    # Strategy 2: Check working directory
-                    if ident in proc_cwd:
-                        return True
-                    
-                    # Strategy 3: Check executable path
-                    if ident in proc_exe:
-                        return True
-                    
-                    for arg in cmdline:
-                        arg_lower = arg.lower()
-                        if ident == arg_lower or f"{ident}?" in arg_lower or f"{ident}=" in arg_lower:
-                            return True
-                        
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            # These are expected exceptions when processes disappear during iteration
+                # Check identifiers against cmdline, cwd, or exe
+                if any(ident and (ident in cmdline_str or ident in p_cwd or ident in p_exe) for ident in identifiers):
+                    # Found via discovery - update tracking
+                    self.pids[server.name] = proc.pid
+                    self._save_pids()
+                    return proc
+        except Exception:
             pass
-        except psutil.Error as e:
-            from .log_manager import logger
-            logger.error_system(f"Unexpected psutil error checking server {server.name}: {e}")
-            raise ProcessOperationError("monitor", server.name, str(e))
-        except Exception as e:
-            from .log_manager import logger
-            logger.error_system(f"Unexpected error checking server {server.name}: {e}")
-            raise ServerOperationError("monitor", server.name, str(e))
-        return False
-    
-    def _is_valid_server_match(self, cmdline_str: str, identifier: str) -> bool:
-        """Validate that the identifier match is not a false positive"""
-        # Split the command line into words
-        words = cmdline_str.split()
-        
-        # Look for exact word matches or parameter matches
-        for word in words:
-            # Exact match
-            if word == identifier:
-                return True
             
-            # Parameter match (e.g., -map=identifier or ?identifier)
-            if identifier in word and (word.startswith(identifier) or 
-                                     f"?{identifier}" in word or 
-                                     f"={identifier}" in word):
-                return True
-        
-        return False
+        return None
+
+    def is_server_running(self) -> Optional[psutil.Process]:
+        """Check if any configured server is running and return its process object."""
+        for server in self.servers:
+            proc = self.get_running_process(server)
+            if proc:
+                return proc
+        return None
+
+    def is_specific_server_running(self, server: ServerConfig) -> bool:
+        """Check if a specific server is running"""
+        return self.get_running_process(server) is not None
 
     def start_server(self, server: ServerConfig):
         import subprocess
-        import shlex
         from .log_manager import logger
         
         logger.info_system(f"Starting {server.name}...")
-        logger.debug_server(f"Starting server: {server.name}")
-        
-        # Check if server is already running
-        logger.debug_server(f"Checking if server {server.name} is already running")
         if self.is_specific_server_running(server):
-            logger.debug_server(f"Server {server.name} is already running, cannot start")
             raise ServerAlreadyRunningError(server.name)
         
-        logger.debug_server(f"Server {server.name} is not running, proceeding with startup")
-        
         try:
-            # Debug: Log server configuration details
-            logger.debug_server(f"Starting server {server.name}")
-            logger.debug_server(f"start_command = '{server.start_command}'")
-            logger.debug_server(f"install_dir = '{server.install_dir}'")
-            
-            # Parse command safely - handle Windows paths properly
-            import os
-            if os.name == 'nt':  # Windows
-                logger.debug_server(f"Parsing Windows command: {server.start_command}")
-                # For Windows, we need to handle paths with spaces and backslashes
-                # If the command starts with a quoted path, handle it specially
-                if server.start_command.startswith('"') and '"' in server.start_command[1:]:
-                    # Find the closing quote
-                    end_quote = server.start_command.find('"', 1)
-                    if end_quote > 1:
-                        executable = server.start_command[1:end_quote]
-                        args = server.start_command[end_quote+1:].strip()
-                        cmd_args = [executable]
-                        if args:
-                            cmd_args.extend(args.split())
-                        logger.debug_server(f"Parsed quoted command: executable='{executable}', args='{args}'")
-                    else:
-                        # Fallback: just split by spaces
-                        cmd_args = server.start_command.split()
-                        logger.debug_server(f"Fallback parsing: split by spaces, got {len(cmd_args)} args")
-                else:
-                    # No quotes, check if it's a single path
-                    if ' ' not in server.start_command:
-                        cmd_args = [server.start_command]
-                        logger.debug_server(f"Single command without spaces: {cmd_args}")
-                    else:
-                        # Try to split but preserve the first part as the executable
-                        parts = server.start_command.split()
-                        cmd_args = [parts[0]]
-                        if len(parts) > 1:
-                            cmd_args.extend(parts[1:])
-                        logger.debug_server(f"Multi-part command: executable='{parts[0]}', {len(parts)-1} args")
-            else:
-                # Unix-like systems, use shlex.split
-                logger.debug_server(f"Parsing Unix command using shlex.split")
-                cmd_args = shlex.split(server.start_command)
-                logger.debug_server(f"Parsed Unix command: {cmd_args}")
-            
-            logger.debug_server(f"Final cmd_args = {cmd_args}")
-            
-            # Set working directory to server install directory
             cwd = server.install_dir if server.install_dir else None
-            logger.debug_server(f"Working directory (cwd) = {cwd}")
             
-            logger.debug_server(f"Executing subprocess.Popen with cmd_args and cwd")
-            subprocess.Popen(
-                cmd_args,
-                shell=False,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-                cwd=cwd  # Set working directory to server install directory
-            )
-            logger.debug_server(f"Server start command executed successfully for {server.name}")
-        except (OSError, ValueError) as e:
-            logger.error_system(f"Failed to start server {server.name}: {e}")
-            logger.debug_server(f"OSError/ValueError starting server {server.name}: {e}")
-            raise ServerOperationError("start", server.name, str(e))
+            if os.name == 'nt':
+                # On Windows, shell=True with the raw string is more reliable for 
+                # complex ARK command lines which often contain dozens of arguments 
+                # and nested quotes.
+                proc = subprocess.Popen(
+                    server.start_command,
+                    shell=True,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    cwd=cwd
+                )
+            else:
+                import shlex
+                cmd_args = shlex.split(server.start_command)
+                proc = subprocess.Popen(
+                    cmd_args,
+                    shell=False,
+                    cwd=cwd
+                )
+            self.pids[server.name] = proc.pid
+            self._save_pids()
+            logger.debug_server(f"Server started (PID: {proc.pid})")
         except Exception as e:
-            logger.error_system(f"Unexpected error starting server {server.name}: {e}")
-            logger.debug_server(f"Unexpected exception starting server {server.name}: {e}")
+            logger.error_system(f"Failed to start server {server.name}: {e}")
             raise ServerOperationError("start", server.name, str(e))
 
-    async def wait_for_server_shutdown(self, server: ServerConfig, timeout: int = 300) -> bool:
-        """Wait for a specific server to shut down using robust process detection"""
+    async def wait_for_servers_online(self, servers, timeout=600, check_interval=10):
         import asyncio
+        from .service_locator import ServiceLocator
         from .log_manager import logger
         
-        logger.debug_server(f"Waiting for server shutdown: {server.name}, timeout: {timeout}s")
+        logger.info_system(f"Waiting for {len(servers)} servers to come online...")
+        start_time = asyncio.get_event_loop().time()
+        rcon_manager = ServiceLocator.get("RCONManager")
         
+        while asyncio.get_event_loop().time() - start_time < timeout:
+            all_online = True
+            for server in servers:
+                if not self.is_specific_server_running(server):
+                    all_online = False
+                    break
+                try:
+                    await rcon_manager.execute_for_server(server, "SaveWorld")
+                except Exception:
+                    all_online = False
+                    break
+            if all_online: return True
+            await asyncio.sleep(check_interval)
+        return False
+
+    async def wait_for_server_shutdown(self, server: ServerConfig, timeout: int = 300) -> bool:
+        import asyncio
+        from .log_manager import logger
         if not self.is_specific_server_running(server):
-            logger.debug_server(f"Server {server.name} is already not running, returning True")
-            return True  # Server is already not running
-        
-        logger.debug_server(f"Server {server.name} is currently running, starting shutdown wait loop")
+            return True
         
         try:
-            for i in range(timeout):
-                logger.debug_server(f"Shutdown check iteration {i+1}/{timeout}")
-                # Use the robust server detection method
-                still_running = self.is_specific_server_running(server)
-                logger.debug_server(f"Server {server.name} still running: {still_running}")
-                
-                if not still_running:
-                    logger.debug_server(f"Server {server.name} has successfully shut down")
+            for _ in range(timeout):
+                if not self.is_specific_server_running(server):
                     return True
-                
-                logger.debug_server(f"Server still running, sleeping for 1 second")
                 await asyncio.sleep(1)
-            
-            logger.warning_system(f"Timeout waiting for server {server.name} to shut down after {timeout} seconds")
-            logger.debug_server(f"Shutdown timeout reached for server {server.name}")
             return False
         except Exception as e:
-            logger.error_system(f"Error while waiting for server {server.name} shutdown: {e}")
-            logger.debug_server(f"Exception during shutdown wait for server {server.name}: {e}")
             raise ServerOperationError("wait for shutdown", server.name, str(e))
+
+    def force_stop_server(self, server: ServerConfig) -> bool:
+        """
+        Ghost Recovery: Forcefully terminate the server process and its children.
+        Used as a fallback when graceful shutdown fails.
+        """
+        import psutil
+        from .log_manager import logger
+        
+        proc = self.get_running_process(server)
+        if not proc:
+            logger.debug_server(f"No process found to force stop for {server.name}")
+            return True
+            
+        try:
+            logger.warning_system(f"Ghost Recovery: Forcefully terminating {server.name} (PID: {proc.pid})")
+            
+            # Kill children first
+            children = proc.children(recursive=True)
+            for child in children:
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            
+            # Kill the main process
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except psutil.TimeoutExpired:
+                logger.warning_system(f"{server.name} did not exit after kill, retrying termination")
+                try:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
+            
+            # Clear tracking
+            if server.name in self.pids:
+                del self.pids[server.name]
+                self._save_pids()
+                
+            logger.info_system(f"Ghost Recovery: {server.name} terminated successfully")
+            return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            logger.debug_server(f"Process already gone or access denied for {server.name}")
+            return True
+        except Exception as e:
+            logger.error_system(f"Ghost Recovery failed for {server.name}: {e}")
+            return False

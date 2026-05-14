@@ -36,7 +36,8 @@ def mock_server():
 @pytest.fixture
 def server_manager(mock_server):
     """Create a ServerManager instance with mock server."""
-    return ServerManager(servers=[mock_server], rcon_tool="rcon-cli")
+    with patch('patchraptor.server_manager.ServerManager._load_pids'):
+        return ServerManager(servers=[mock_server], rcon_tool="rcon-cli")
 
 
 class TestServerManagerInit:
@@ -99,7 +100,12 @@ class TestServerRunningChecks:
         # Mock a running ARK server process
         mock_process = Mock()
         mock_process.pid = 1234
-        mock_process.info = {'name': 'ArkAscendedServer.exe', 'exe': 'C:\\ARK\\ArkAscendedServer.exe', 'cmdline': ['ArkAscendedServer.exe']}
+        mock_process.info = {
+            'name': 'ArkAscendedServer.exe',
+            'exe': 'C:\\ARK\\ArkAscendedServer.exe',
+            'cmdline': ['ArkAscendedServer.exe', 'TheIsland_WP', '?listen'],
+            'cwd': 'C:\\ARK'
+        }
         mock_process_iter.return_value = [mock_process]
         
         result = server_manager.is_server_running()
@@ -119,11 +125,11 @@ class TestServerRunningChecks:
     
     @patch('psutil.process_iter')
     def test_is_server_running_psutil_error(self, mock_process_iter, server_manager):
-        """Test handling psutil errors."""
+        """Test handling psutil errors (now swallowed)."""
         mock_process_iter.side_effect = psutil.Error("Unexpected error")
         
-        with pytest.raises(ProcessOperationError):
-            server_manager.is_server_running()
+        result = server_manager.is_server_running()
+        assert result is None
     
     @patch('psutil.process_iter')
     def test_is_server_running_access_denied(self, mock_process_iter, server_manager):
@@ -192,38 +198,20 @@ class TestServerRunningChecks:
     
     @patch('psutil.process_iter')
     def test_is_specific_server_running_psutil_error(self, mock_process_iter, server_manager, mock_server):
-        """Test handling psutil errors in specific server check."""
+        """Test handling psutil errors in specific server check (now swallowed)."""
         mock_process_iter.side_effect = psutil.Error("Unexpected error")
         
-        with pytest.raises(ProcessOperationError):
-            server_manager.is_specific_server_running(mock_server)
+        result = server_manager.is_specific_server_running(mock_server)
+        assert result is False
     
     @patch('psutil.process_iter')
     def test_is_specific_server_running_general_error(self, mock_process_iter, server_manager, mock_server):
-        """Test handling general errors in specific server check."""
+        """Test handling general errors in specific server check (now swallowed)."""
         mock_process_iter.side_effect = Exception("Unexpected error")
         
-        with pytest.raises(ServerOperationError):
-            server_manager.is_specific_server_running(mock_server)
-
-
-class TestIsValidServerMatch:
-    """Test server match validation."""
-    
-    def test_is_valid_server_match_exact(self, server_manager):
-        """Test exact word match."""
-        result = server_manager._is_valid_server_match("ArkAscendedServer.exe theisland_wp?listen", "theisland_wp")
-        assert result is True
-    
-    def test_is_valid_server_match_parameter(self, server_manager):
-        """Test parameter match."""
-        result = server_manager._is_valid_server_match("ArkAscendedServer.exe ?theisland_wp", "theisland_wp")
-        assert result is True
-    
-    def test_is_valid_server_match_no_match(self, server_manager):
-        """Test no match."""
-        result = server_manager._is_valid_server_match("ArkAscendedServer.exe other_map", "theisland_wp")
+        result = server_manager.is_specific_server_running(mock_server)
         assert result is False
+
 
 
 class TestStartServer:

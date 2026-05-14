@@ -9,6 +9,7 @@ from .rcon_manager import RCONManager
 from .backup_manager import BackupManager
 from .discord_manager import DiscordManager
 from .config import ConfigManager
+from .service_locator import ServiceLocator
 from .exceptions import (
     ServerError,
     ServerNotFoundError,
@@ -27,52 +28,95 @@ from .exceptions import (
     RCONConnectionError,
     RCONCommandError
 )
-from .raptorchat_utils import RaptorChatUtils
+from .system_utils import SystemUtils
+from .base_handler import BaseHandler
 
 
-class BackupRestoreHandler:
+class BackupRestoreHandler(BaseHandler):
     """Handles backup and restore commands: backup, restore"""
-    
-    def __init__(
-        self,
-        server_manager: ServerManager,
-        rcon_manager: RCONManager,
-        backup_manager: BackupManager,
-        discord_manager: DiscordManager,
-        config_manager: ConfigManager,
-        raptorchat_manager=None
-    ):
-        self.server_manager = server_manager
-        self.rcon_manager = rcon_manager
-        self.backup_manager = backup_manager
-        self.discord_manager = discord_manager
-        self.config_manager = config_manager
-        self.raptorchat_manager = raptorchat_manager
+
+    def _get_highest_ark_mtime(self, save_path):
+        """Get the highest modification time of any .ark file in the save path"""
+        highest = 0
+        try:
+            if not isinstance(save_path, str) or not os.path.isdir(save_path):
+                return highest
+            for f in os.listdir(save_path):
+                if f.lower().endswith('.ark'):
+                    fpath = os.path.join(save_path, f)
+                    if os.path.exists(fpath):
+                        highest = max(highest, os.path.getmtime(fpath))
+        except Exception as e:
+            logger.debug_system(f"Error checking ark mtimes: {e}")
+        return highest
 
     async def _trigger_save_and_wait(self, server, channel):
-        """Send SaveWorld and wait for data flush if server is running"""
+        """Send SaveWorld and wait for file modification time to increase"""
         if self.server_manager.is_specific_server_running(server):
+            display_name = self.server_manager.get_display_name(server)
             try:
+                save_path = getattr(server, 'server_save_path', None)
+                initial_mtime = self._get_highest_ark_mtime(save_path)
+                
                 # Notify save trigger
-                await self.discord_manager.send_temp_message(channel, f"💾 Triggering world save for {server.name}...")
+                await self.discord_manager.send_temp_message(channel, f"💾 Triggering world save for {display_name}...")
                 logger.info_system(f"Sending SaveWorld RCON command to {server.name}")
                 
+                # We expect "World Saved" or similar in response, but we'll rely on mtime for truth
                 await self.rcon_manager.execute_for_server(server, "SaveWorld")
                 
-                # Wait for file flush
-                await self.discord_manager.send_temp_message(channel, f"⏳ Waiting 10s for save to flush to disk...")
-                logger.info_system(f"Waiting 10s for {server.name} save flush")
-                await asyncio.sleep(10)
+                # Wait for file modification and flush (max 15s)
+                await self.discord_manager.send_temp_message(channel, f"⏳ Validating save flush for {display_name}...")
+                
+                save_confirmed = False
+                for attempt in range(3): # 3 * 5s = 15s max
+                    await asyncio.sleep(5)
+                    
+                    current_mtime = self._get_highest_ark_mtime(save_path)
+                    if current_mtime > initial_mtime:
+                        # Save detected, now wait for size to stabilize (flush completion)
+                        updated_file = None
+                        if save_path and os.path.isdir(save_path):
+                            for f in os.listdir(save_path):
+                                if f.lower().endswith('.ark'):
+                                    fpath = os.path.join(save_path, f)
+                                    if os.path.exists(fpath) and os.path.getmtime(fpath) > initial_mtime:
+                                        updated_file = fpath
+                                        break
+                        
+                        if updated_file:
+                            last_size = os.path.getsize(updated_file)
+                            await asyncio.sleep(2)
+                            if os.path.getsize(updated_file) == last_size:
+                                logger.info_system(f"Save confirmed for {server.name} (mtime: {current_mtime})")
+                                save_confirmed = True
+                                break
+                        else:
+                            await asyncio.sleep(2)
+                            save_confirmed = True
+                            break
+                
+                if not save_confirmed:
+                    await asyncio.sleep(2) # Short fallback wait
+                else:
+                    await self.discord_manager.send_temp_message(channel, f"✅ Save confirmed for {display_name}.")
                 
             except (RCONConnectionError, RCONCommandError) as e:
                 logger.warning_system(f"Failed to send SaveWorld to {server.name}: {e}. Proceeding with backup anyway.")
                 await self.discord_manager.send_temp_message(channel, f"⚠️ RCON failed ({e}), proceeding with backup...")
+            except Exception as e:
+                logger.error_system(f"Error during save validation for {server.name}: {e}")
+                await asyncio.sleep(10) # Fallback wait
         else:
             logger.info_system(f"{server.name} is offline, skipping SaveWorld")
 
     async def cmd_backup(self, message, content: str, content_lower: str):
         """Handle .backup command"""
-        logger.info_command(".backup received")
+        author_id = getattr(getattr(message, "author", None), "id", None)
+        if author_id == "ScheduleSystem":
+            logger.info_command("Scheduled .backup initialising...")
+        else:
+            logger.info_command(".backup received")
         parts = content.strip().split()
         
         if len(parts) < 2:
@@ -280,39 +324,20 @@ class BackupRestoreHandler:
                 self.server_manager.start_server(server)
                 logger.info_system(f"{server.name} started successfully")
                 
-                # Wait for server to come online (polling)
+                # Wait for server to come back online
                 await self.discord_manager.send_temp_message(
                     message.channel, f"⏳ Waiting for {display_name} to come back online..."
                 )
                 
-                server_online = False
-                wait_start = asyncio.get_event_loop().time()
-                while asyncio.get_event_loop().time() - wait_start < 300: # 5 minute timeout
-                    if self.server_manager.is_specific_server_running(server):
-                        # Try RCON to confirm fullness
-                        try:
-                            await self.rcon_manager.execute_for_server(server, "SaveWorld")
-                            server_online = True
-                            break
-                        except (RCONConnectionError, RCONCommandError):
-                            pass # Process is running but RCON not ready
-                    await asyncio.sleep(10)
+                server_online = await self.server_manager.wait_for_servers_online([server])
                 
-                if not server_online:
-                     await self.discord_manager.send_temp_message(
-                        message.channel, f"⚠️ Timeout waiting for {display_name} to come online. Chat relay may not reconnect automatically."
-                    )
-                else:
-                    # Server is online, wait 5 minutes for stabilization (standard cluster behavior)
+                if server_online:
                     logger.info_system(f"Successfully restored backup {os.path.basename(backup_file)} for {server.name}")
+                    await self.discord_manager.send_temp_message(message.channel, f"🦕 {display_name} is back online")
+                    await self.discord_manager.send_temp_message(message.channel, "🦖 Restore process completed")
+                else:
                     await self.discord_manager.send_temp_message(
-                        message.channel, f"🦖 Successfully restored backup {os.path.basename(backup_file)} for {display_name}..."
-                    )
-                    await RaptorChatUtils.delayed_raptorchat_restart(
-                        self.raptorchat_manager,
-                        300, # 5 minutes delay
-                        message.channel,
-                        self.discord_manager
+                        message.channel, f"⚠️ Timeout waiting for {display_name} to come online. Chat relay may not reconnect automatically."
                     )
                 
             except ServerAlreadyRunningError as e:

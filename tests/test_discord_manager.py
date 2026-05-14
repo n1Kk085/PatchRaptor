@@ -51,11 +51,22 @@ class TestSendTempMessage:
         mock_message = Mock()
         mock_channel.send = AsyncMock(return_value=mock_message)
         
-        with patch.object(dm, '_delete_message_later', new_callable=AsyncMock):
+        with patch('patchraptor.service_locator.ServiceLocator.get') as mock_sl_get, \
+             patch.object(dm, '_delete_message_later', new_callable=AsyncMock):
+            mock_config = Mock()
+            mock_config.get.return_value = None # No logo
+            mock_sl_get.return_value = mock_config
+            
             result = await dm.send_temp_message(mock_channel, "Test message", title="Test Title")
         
         assert result == mock_message
         mock_channel.send.assert_called_once()
+        # Verify it sent an embed even for simple content
+        _, kwargs = mock_channel.send.call_args
+        assert "embed" in kwargs
+        assert kwargs["embed"].title == "Test Title"
+        # Check if thumbnail is not set
+        assert not kwargs["embed"].thumbnail.url
     
     @pytest.mark.asyncio
     async def test_send_temp_message_long_content(self):
@@ -158,14 +169,15 @@ class TestGetDefaultChannel:
         dm = DiscordManager()
         dm.discord_client = Mock()
         
-        with patch('patchraptor.config.ConfigManager') as mock_config_cls:
+        with patch('patchraptor.service_locator.ServiceLocator.get') as mock_sl_get:
             mock_config = Mock()
             mock_config.get.return_value = None
-            mock_config_cls.return_value = mock_config
+            mock_sl_get.return_value = mock_config
             
             result = await dm.get_default_channel()
             
             assert result is None
+            mock_sl_get.assert_called_with("ConfigManager")
     
     @pytest.mark.asyncio
     async def test_get_default_channel_channel_not_found(self):
@@ -175,10 +187,10 @@ class TestGetDefaultChannel:
         mock_client.get_channel.return_value = None
         dm.discord_client = mock_client
         
-        with patch('patchraptor.config.ConfigManager') as mock_config_cls:
+        with patch('patchraptor.service_locator.ServiceLocator.get') as mock_sl_get:
             mock_config = Mock()
             mock_config.get.return_value = "123456789"
-            mock_config_cls.return_value = mock_config
+            mock_sl_get.return_value = mock_config
             
             result = await dm.get_default_channel()
             
@@ -206,10 +218,10 @@ class TestGetDefaultChannel:
         mock_client.get_channel.return_value = mock_channel
         dm.discord_client = mock_client
         
-        with patch('patchraptor.config.ConfigManager') as mock_config_cls:
+        with patch('patchraptor.service_locator.ServiceLocator.get') as mock_sl_get:
             mock_config = Mock()
             mock_config.get.return_value = "123456789"
-            mock_config_cls.return_value = mock_config
+            mock_sl_get.return_value = mock_config
             
             result = await dm.get_default_channel()
             
@@ -237,10 +249,10 @@ class TestGetDefaultChannel:
         mock_client.get_channel.return_value = mock_channel
         dm.discord_client = mock_client
         
-        with patch('patchraptor.config.ConfigManager') as mock_config_cls:
+        with patch('patchraptor.service_locator.ServiceLocator.get') as mock_sl_get:
             mock_config = Mock()
             mock_config.get.return_value = "123456789"
-            mock_config_cls.return_value = mock_config
+            mock_sl_get.return_value = mock_config
             
             result = await dm.get_default_channel()
             
@@ -252,10 +264,10 @@ class TestGetDefaultChannel:
         dm = DiscordManager()
         dm.discord_client = Mock()
         
-        with patch('patchraptor.config.ConfigManager') as mock_config_cls:
+        with patch('patchraptor.service_locator.ServiceLocator.get') as mock_sl_get:
             mock_config = Mock()
             mock_config.get.return_value = "not_a_number"
-            mock_config_cls.return_value = mock_config
+            mock_sl_get.return_value = mock_config
             
             result = await dm.get_default_channel()
             
@@ -267,10 +279,10 @@ class TestGetDefaultChannel:
         dm = DiscordManager()
         dm.discord_client = Mock()
         
-        with patch('patchraptor.config.ConfigManager') as mock_config_cls:
+        with patch('patchraptor.service_locator.ServiceLocator.get') as mock_sl_get:
             mock_config = Mock()
             mock_config.get.side_effect = Exception("Config error")
-            mock_config_cls.return_value = mock_config
+            mock_sl_get.return_value = mock_config
             
             result = await dm.get_default_channel()
             

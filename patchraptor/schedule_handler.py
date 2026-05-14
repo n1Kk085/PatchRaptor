@@ -9,21 +9,13 @@ from .exceptions import (
     ScheduleParseError,
     ScheduleOperationError
 )
+from .service_locator import ServiceLocator
+from .base_handler import BaseHandler
 
 
-class ScheduleHandler:
-    """Handles scheduling commands: schedule"""
+class ScheduleHandler(BaseHandler):
+    """Handles event scheduling commands: schedule, schedule add, schedule clear"""
     
-    def __init__(
-        self,
-        server_manager: ServerManager,
-        discord_manager: DiscordManager,
-        schedule_manager: ScheduleManager
-    ):
-        self.server_manager = server_manager
-        self.discord_manager = discord_manager
-        self.schedule_manager = schedule_manager
-
     async def cmd_schedule(self, message, content: str, content_lower: str):
         """Handle .schedule command"""
         logger.info_command(".schedule received")
@@ -82,10 +74,10 @@ class ScheduleHandler:
             # Step 1: Validate event type
             logger.info_system("Validating event type...")
             evt_type = args[1].lower()
-            if evt_type not in ("shutdown", "reboot", "update", "backup"):
+            if evt_type not in ("shutdown", "reboot", "patch", "backup"):
                 logger.warning_system(f"Invalid event type: {evt_type}")
                 await self.discord_manager.send_temp_message(
-                    message.channel, "⚠️ Invalid event type. Use: shutdown, reboot, update, or backup"
+                    message.channel, "⚠️ Invalid event type. Use: shutdown, reboot, patch, or backup"
                 )
                 return
             
@@ -94,6 +86,9 @@ class ScheduleHandler:
             time_str = args[-1]
             try:
                 import datetime
+                import re
+                if not re.match(r"^([01][0-9]|2[0-3]):[0-5][0-9]$", time_str):
+                    raise ValueError("Strict 24-hour HH:MM format required")
                 datetime.datetime.strptime(time_str, "%H:%M")
                 logger.info_system(f"Time format validated: {time_str}")
             except Exception:
@@ -184,7 +179,7 @@ class ScheduleHandler:
             if len(args) > 2:
                 logger.warning_system("Invalid arguments for schedule clear")
                 await self.discord_manager.send_temp_message(
-                    message.channel, "⚠️ Usage: .schedule clear [all|shutdown|reboot|update|backup]"
+                    message.channel, "⚠️ Usage: .schedule clear [all|shutdown|reboot|patch|backup]"
                 )
                 return
             
@@ -199,7 +194,7 @@ class ScheduleHandler:
                     await self.discord_manager.send_temp_message(
                         message.channel, "🦖 Cleared all scheduled events."
                     )
-                elif type_to_clear in ("shutdown", "reboot", "update", "backup"):
+                elif type_to_clear in ("shutdown", "reboot", "patch", "backup"):
                     logger.info_system(f"Clearing {type_to_clear} events...")
                     removed_count = self.schedule_manager.clear_events(type_to_clear)
                     if removed_count > 0:
@@ -215,7 +210,7 @@ class ScheduleHandler:
                 else:
                     logger.warning_system(f"Invalid event type for clear: {type_to_clear}")
                     await self.discord_manager.send_temp_message(
-                        message.channel, f"⚠️ Invalid event type '{type_to_clear}'. Use: all, shutdown, reboot, update, or backup"
+                        message.channel, f"⚠️ Invalid event type '{type_to_clear}'. Use: all, shutdown, reboot, patch, or backup"
                     )
             else:
                 # Step 1: Clear all events

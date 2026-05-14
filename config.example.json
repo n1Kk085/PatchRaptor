@@ -7,8 +7,18 @@
   "rcon_tool": "C:\\Path\\To\\rcon.exe",
   "app_id": "2430930",
   "webhook_messages": {
-    "shutdown": "Server is shutting down for maintenance.",
-    "reboot": "Server is rebooting."
+    "shutdown": "🦖 Cluster is going offline for a server update in {timer} minutes.",
+    "reboot": "🦕 Update applied. All servers are back online and systems are re-linked. Join now!"
+  },
+  "patch_settings": {
+    "timer": 15,
+    "message": "Servers will be shutting down for maintenance in {minutes} minutes",
+    "intervals": [
+      15,
+      10,
+      5,
+      1
+    ]
   },
   "backup_config": {
     "backup_path": "C:\\Path\\To\\Backups",

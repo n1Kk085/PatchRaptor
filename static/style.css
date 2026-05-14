@@ -342,5 +342,24 @@ footer {
 }
 
 .text-purple {
-    color: #ab47bc;
+    color: #c084fc;
+}
+
+.text-yellow {
+    color: #facc15;
+}
+
+.pulse-live {
+    animation: pulse-live 2s infinite ease-in-out;
+}
+
+@keyframes pulse-live {
+    0%, 100% {
+        opacity: 1;
+        filter: drop-shadow(0 0 2px #4ade80);
+    }
+    50% {
+        opacity: 0.4;
+        filter: drop-shadow(0 0 8px #4ade80);
+    }
 }

@@ -8,17 +8,46 @@ SCHEDULE_FILE = "schedule.json"
 
 class ScheduleManager:
     """Manages scheduled events and background execution with persistence."""
-    def __init__(self, schedule_file: str = SCHEDULE_FILE, server_control_handler=None, 
-                 backup_restore_handler=None, update_management_handler=None):
+    def __init__(self, schedule_file: str = SCHEDULE_FILE):
         self.schedule_file = schedule_file
         self.scheduled_events: List[Dict[str, Any]] = []
-        self.load_schedule()
         self._runner_started = False
-        
-        # Store focused handler references
-        self.server_control_handler = server_control_handler
-        self.backup_restore_handler = backup_restore_handler
-        self.update_management_handler = update_management_handler
+
+    @property
+    def config_manager(self):
+        from .service_locator import ServiceLocator
+        return ServiceLocator.get("ConfigManager")
+
+    @property
+    def discord_manager(self):
+        from .service_locator import ServiceLocator
+        return ServiceLocator.get("DiscordManager")
+
+    @property
+    def server_manager(self):
+        from .service_locator import ServiceLocator
+        return ServiceLocator.get("ServerManager")
+
+    @property
+    def server_control_handler(self):
+        from .service_locator import ServiceLocator
+        return ServiceLocator.get("ServerControlHandler")
+
+    @property
+    def backup_restore_handler(self):
+        from .service_locator import ServiceLocator
+        return ServiceLocator.get("BackupRestoreHandler")
+
+    @property
+    def update_management_handler(self):
+        from .service_locator import ServiceLocator
+        return ServiceLocator.get("UpdateManagementHandler")
+
+    async def initialize(self):
+        """Async initialization for the schedule manager"""
+        logger.debug_schedule(f"Initializing ScheduleManager...")
+        await asyncio.to_thread(self.load_schedule)
+        logger.debug_schedule(f"ScheduleManager initialized with {len(self.scheduled_events)} events")
 
     def load_schedule(self):
         logger.debug_schedule(f"Loading schedule from file: {self.schedule_file}")
@@ -96,8 +125,7 @@ class ScheduleManager:
         logger.debug_schedule(f"Returning {len(events)} scheduled events")
         return events
 
-    async def schedule_runner(self, client, server_manager, rcon_manager, 
-                            discord_manager, command_handler):
+    async def schedule_runner(self):
         logger.debug_schedule(f"Starting schedule runner, already started: {self._runner_started}")
         if self._runner_started:
             logger.debug_schedule(f"Schedule runner already started, skipping")
@@ -105,8 +133,14 @@ class ScheduleManager:
         
         logger.debug_schedule(f"Marking runner as started and waiting for client ready")
         self._runner_started = True
+        
+        client = self.discord_manager.discord_client
+        if not client:
+            logger.error_system("Discord client not available in schedule_runner, skipping.")
+            return
+
         await client.wait_until_ready()
-        logger.info_system("Schedule runner started")
+        logger.info_system("Automated Schedule Runner initialized...")
         logger.debug_schedule(f"Schedule runner is ready, entering main loop")
         
         while not client.is_closed():
@@ -115,7 +149,7 @@ class ScheduleManager:
                 current_time = now.strftime("%H:%M")
                 current_day = now.strftime("%a").lower()
                 
-                channel = client.get_channel(int(client.config_manager.get("channel_id")))
+                channel = await self.discord_manager.get_default_channel()
                 if not channel:
                     logger.error_system("Target channel not found in schedule_runner.")
                     continue
@@ -126,10 +160,7 @@ class ScheduleManager:
                         continue
                     
                     if event["time"] == current_time:
-                        await self._execute_scheduled_event(event, channel, server_manager, 
-                                                           rcon_manager, discord_manager, command_handler,
-                                                           self.server_control_handler, self.backup_restore_handler, 
-                                                           self.update_management_handler)
+                        await self._execute_scheduled_event(event, channel)
                         
                         # Sleep to avoid executing the same event multiple times
                         await asyncio.sleep(60)
@@ -137,10 +168,20 @@ class ScheduleManager:
                 logger.error_system(f"Error in schedule runner: {e}")
             await asyncio.sleep(30)
     
-    async def _execute_scheduled_event(self, event, channel, server_manager, 
-                                      rcon_manager, discord_manager, command_handler,
-                                      server_control_handler, backup_restore_handler, update_management_handler):
+    async def _execute_scheduled_event(self, event, channel=None):
         """Execute a specific scheduled event using the appropriate command handler"""
+        # Resolve channel via discord_manager if not provided
+        if not channel:
+            channel = await self.discord_manager.get_default_channel()
+        
+        if not channel:
+            logger.error_system("No default channel found for scheduled event execution")
+            return
+            
+        # Get discord client (via ServiceLocator if needed, but here we can grab from managers)
+        # Assuming discord_manager has a client or can send messages directly.
+        # Actually, DiscordManager usually has a 'client' attribute or 'bot'.
+        
         event_type = event.get("type")
         subtype = event.get("subtype")
         map_name = event.get("map_name")
@@ -161,7 +202,7 @@ class ScheduleManager:
             display_name = f"'{map_name}'" if map_name else "all servers"
             event_display = f"{event_type} ({display_name})" if map_name else f"{event_type}"
             
-            await discord_manager.send_temp_message(
+            await self.discord_manager.send_temp_message(
                 channel, f"⏰ Executing scheduled {event_display}..."
             )
             
@@ -170,13 +211,13 @@ class ScheduleManager:
                 if subtype == "map" and map_name:
                     # Map-specific shutdown
                     mock_msg.content = f".shutdown {map_name}"
-                    await server_control_handler.cmd_shutdown(
+                    await self.server_control_handler.cmd_shutdown(
                         mock_msg, mock_msg.content, mock_msg.content.lower()
                     )
                 else:
                     # Global shutdown
                     mock_msg.content = ".shutdown"
-                    await server_control_handler.cmd_shutdown(
+                    await self.server_control_handler.cmd_shutdown(
                         mock_msg, mock_msg.content, mock_msg.content.lower()
                     )
             
@@ -184,60 +225,53 @@ class ScheduleManager:
                 if subtype == "map" and map_name:
                     # Map-specific reboot
                     mock_msg.content = f".reboot {map_name}"
-                    await server_control_handler.cmd_reboot(
+                    await self.server_control_handler.cmd_reboot(
                         mock_msg, mock_msg.content, mock_msg.content.lower()
                     )
                 else:
                     # Global reboot
                     mock_msg.content = ".reboot"
-                    await server_control_handler.cmd_reboot(
+                    await self.server_control_handler.cmd_reboot(
                         mock_msg, mock_msg.content, mock_msg.content.lower()
                     )
             
-            elif event_type == "update":
-                if subtype == "map" and map_name:
-                    # Map-specific update
-                    await discord_manager.send_temp_message(
-                        channel, f"⚠️ Map update functionality not yet implemented for {map_name}"
-                    )
-                    logger.warning_system(f"Scheduled map update for {map_name} requested but not implemented")
-                else:
-                    # Global update
-                    mock_msg.content = ".update"
-                    await update_management_handler.cmd_update(
-                        mock_msg, mock_msg.content, mock_msg.content.lower()
-                    )
+            elif event_type == "patch":
+                # Updates are always global due to shared installation
+                mock_msg.content = ".patch"
+                await self.update_management_handler.cmd_patch(
+                    mock_msg, mock_msg.content, mock_msg.content.lower()
+                )
             
             elif event_type == "backup":
                 if subtype == "map" and map_name:
                     # Map-specific backup
-                    server = server_manager.find_server(map_name)
+                    server = self.server_manager.find_server(map_name)
                     if server:
                         mock_msg.content = f".backup {server.name}"
-                        await backup_restore_handler.cmd_backup(
+                        await self.backup_restore_handler.cmd_backup(
                             mock_msg, mock_msg.content, mock_msg.content.lower()
                         )
                     else:
-                        await discord_manager.send_temp_message(
+                        await self.discord_manager.send_temp_message(
                             channel, f"⚠️ Server '{map_name}' not found for backup"
                         )
                         logger.warning_system(f"Server '{map_name}' not found for scheduled backup")
                 else:
-                    # Global backup (handles both "all" and legacy cases)
+                    # Global backup (handles "all")
                     mock_msg.content = ".backup all"
-                    await backup_restore_handler.cmd_backup(
+                    await self.backup_restore_handler.cmd_backup(
                         mock_msg, mock_msg.content, mock_msg.content.lower()
                     )
             
             else:
                 logger.warning_system(f"Unknown scheduled event type: {event_type}")
-                await discord_manager.send_temp_message(
+                await self.discord_manager.send_temp_message(
                     channel, f"⚠️ Unknown scheduled event type: {event_type}"
                 )
         
         except Exception as e:
             logger.error_system(f"Failed to execute scheduled {event_type} event: {e}")
             logger.debug_schedule(f"Exception in scheduled {event_type} execution: {e}")
-            await discord_manager.send_temp_message(
+            await self.discord_manager.send_temp_message(
                 channel, f"⚠️ Failed to execute scheduled {event_type}: {str(e)[:100]}"
             )

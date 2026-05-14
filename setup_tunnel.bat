@@ -6,8 +6,6 @@ REM Define ESC character for ANSI colors
 for /F "tokens=1,2 delims=#" %%a in ('"prompt #$H#$E# & echo on & for %%b in (1) do rem"') do set "ESC=%%b"
 
 REM Set text color to PatchRaptor Blue (RGB: 91, 131, 201)
-echo %ESC%[38;2;91;131;201m
-
 echo.
 echo ==========================================
 echo   PatchRaptor Cloudflare Tunnel Setup
@@ -195,8 +193,8 @@ echo.
 echo Creating config.yml for the tunnel...
 
 echo.
-set /p PANEL_PORT="Enter Web Panel Port (default 8080): "
-if "%PANEL_PORT%"=="" set PANEL_PORT=8080
+set /p PANEL_PORT="Enter Web Panel Port (default 8095): "
+if "%PANEL_PORT%"=="" set PANEL_PORT=8095
 
 (
 echo url: http://127.0.0.1:%PANEL_PORT%

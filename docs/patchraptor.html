@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PatchRaptor - Architecture Design</title>
+    
+    <!-- Brand Styles -->
+    <style>
+        :root {
+            --bg-color: #222222;
+            --primary-color: #5B83C9;
+            --hover-color: #4665a7;
+            --text-primary: #ffffff;
+            --text-secondary: #aaaaaa;
+            --border-color: #444444;
+            --font-main: 'Consolas', monospace;
+            --card-bg: #2a2a2a;
+            --success-color: #4caf50;
+            --danger-color: #f44336;
+            --warning-color: #ff9800;
+            --info-color: #2196f3;
+            --code-bg: #111111;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        a {
+            text-decoration: none;
+            color: var(--primary-color);
+            transition: color 0.3s ease;
+        }
+
+        a:hover {
+            color: var(--hover-color);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 25px;
+            width: 100%;
+        }
+
+        /* --- HEADER --- */
+        header {
+            background-color: #1a1a1a;
+            border-bottom: 2px solid var(--border-color);
+            padding-top: 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            letter-spacing: -0.5px;
+        }
+
+        .logo img {
+            height: 44px;
+            width: 44px;
+            border-radius: 50%;
+        }
+
+        .nav-links a {
+            margin-left: 25px;
+            font-size: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .nav-links a:hover {
+            color: var(--primary-color);
+        }
+
+        /* --- MAIN CONTENT --- */
+        main {
+            flex: 1;
+            padding: 30px 0;
+        }
+
+        .section {
+            margin-bottom: 40px;
+            padding: 25px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-header h1,
+        .section-header h2 {
+            margin: 0;
+            font-size: 1.6rem;
+            color: white;
+        }
+
+        .section-header h3 {
+            margin: 0;
+            font-size: 1.3rem;
+            color: var(--primary-color);
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+        }
+
+        /* --- FEATURES GRID --- */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 15px;
+        }
+
+        .feature-card {
+            background-color: #252525;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--primary-color);
+        }
+
+        .feature-card h3 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.2rem;
+            color: var(--primary-color);
+            margin-bottom: 12px;
+        }
+
+        /* --- SYSTEM TIERS --- */
+        .system-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .system-card {
+            background-color: #252525;
+            border-left: 4px solid var(--primary-color);
+            padding: 18px;
+            border-radius: 6px;
+        }
+
+        .system-card.p0 {
+            border-left-color: #e53935;
+        }
+
+        .system-card.p1 {
+            border-left-color: var(--warning-color);
+        }
+
+        .system-card.p2 {
+            border-left-color: var(--info-color);
+        }
+
+        .system-card h4 {
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+        }
+
+        .priority-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-left: 8px;
+            text-transform: uppercase;
+        }
+
+        .priority-badge.p0 { background-color: rgba(229, 57, 53, 0.2); color: #ef5350; }
+        .priority-badge.p1 { background-color: rgba(255, 152, 0, 0.2); color: #ffa726; }
+        .priority-badge.p2 { background-color: rgba(33, 150, 243, 0.2); color: #64b5f6; }
+
+        /* --- DIAGRAMS --- */
+        .diagram-box {
+            background-color: var(--code-bg);
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            margin-top: 15px;
+            overflow-x: auto;
+        }
+
+        .diagram-diagram {
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+        }
+
+        /* --- TABLES --- */
+        .table-wrapper {
+            overflow-x: auto;
+            margin-top: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background-color: #1f1f1f;
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+
+        tr:hover {
+            background-color: #252525;
+        }
+
+        /* --- CODE BLOCKS --- */
+        pre {
+            background-color: var(--code-bg);
+            padding: 18px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            border: 1px solid var(--border-color);
+            margin-top: 15px;
+        }
+
+        code {
+            font-family: 'Consolas', monospace;
+        }
+
+        /* --- FOOTER --- */
+        footer {
+            text-align: center;
+            padding: 25px;
+            background-color: #1a1a1a;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .footer-note {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* --- UTILITIES --- */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .badge-success { background-color: rgba(76, 175, 80, 0.2); color: #81c784; }
+        .badge-danger { background-color: rgba(244, 67, 54, 0.2); color: #e57373; }
+        .badge-warning { background-color: rgba(255, 152, 0, 0.2); color: #ffa726; }
+        
+        .highlight {
+            background-color: rgba(91, 131, 201, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        /* --- BANNER --- */
+        .banner {
+            background: linear-gradient(135deg, var(--primary-color), #4665a7);
+            color: #fff;
+            padding: 15px 20px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 25px;
+        }
+
+        /* --- COMMAND EXAMPLES --- */
+        .commands-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 12px;
+        }
+
+        .command-card {
+            background-color: var(--code-bg);
+            padding: 12px;
+            border-radius: 4px;
+            border-left: 3px solid var(--primary-color);
+        }
+
+        .command-card h5 {
+            color: white;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+
+        .command-card code {
+            display: block;
+            color: #a8d8ff;
+            font-size: 0.85rem;
+            word-break: break-all;
+        }
+
+        /* --- CATEGORIES --- */
+        .categories-list {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 8px;
+        }
+
+        .categories-list li {
+            background-color: #252525;
+            padding: 8px 12px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .categories-list li:before {
+            content: '•';
+            color: var(--primary-color);
+            font-size: 1.5rem;
+            line-height: 1;
+        }
+
+        /* --- ALERTS --- */
+        .alert-box {
+            background-color: rgba(33, 150, 243, 0.15);
+            border-left: 4px solid var(--info-color);
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+        }
+
+        .alert-box.warning {
+            background-color: rgba(255, 152, 0, 0.15);
+            border-left-color: var(--warning-color);
+        }
+
+        .alert-box.danger {
+            background-color: rgba(244, 67, 54, 0.15);
+            border-left-color: var(--danger-color);
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <img src="pr40.png" alt="PatchRaptor Logo">
+                    PatchRaptor Architecture Design
+                </div>
+                <nav class="nav-links">
+                    <a href="#overview">Overview</a>
+                    <a href="#entry-points">Entry Points</a>
+                    <a href="#systems">Systems</a>
+                    <a href="#architecture">Architecture</a>
+                    <a href="#commands">Commands</a>
+                    <a href="#deployment">Deployment</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Banner -->
+    <div class="container">
+        <div class="banner">
+            🔒 Source-Available | 🖥️ Windows-Focused | ⚙️ Production-Grade
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="container">
+
+        <!-- Overview Section -->
+        <section id="overview" class="section">
+            <div class="section-header">
+                <h1>🦖 PatchRaptor Architecture Design</h1>
+            </div>
+            <p>
+                A production-oriented automation toolkit for managing <strong>ARK: Survival Ascended</strong> dedicated server clusters.
+                Provides Discord-based control, automated patching, backups, player management, cross-server chat relay (RaptorChat), 
+                and a branded web dashboard.
+            </p>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <h3>🔐 Source-Available</h3>
+                    <p>Full source code available for security auditing. No black-box dependencies.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🪟 Windows-Focused</h3>
+                    <p>Targets Windows Server 2019/2022 and Windows 10/11. Native subprocess handling.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🔧 Production-Grade</h3>
+                    <p>Manual deployment, no CI/CD dependency. Operates in real server environments.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>⚡ Performance-Optimized</h3>
+                    <p>Atomic file writes, thread-pooled blocking operations, 2s-10s telemetry intervals.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Entry Points Section -->
+        <section id="entry-points" class="section">
+            <div class="section-header">
+                <h2>📂 Primary Entry Points</h2>
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Entry Point</th>
+                        <th>Path</th>
+                        <th>Mode</th>
+                        <th>Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>main.py</strong></td>
+                        <td>/main.py</td>
+                        <td><span class="badge badge-success">Primary Production</span></td>
+                        <td>Discord Bot - Async client with supervised background tasks</td>
+                    </tr>
+                    <tr>
+                        <td><strong>PatchRaptor.py</strong></td>
+                        <td>/PatchRaptor.py</td>
+                        <td><span class="badge badge-warning">GUI Wrapper</span></td>
+                        <td>Tkinter/CustomTkinter launcher for config and monitoring</td>
+                    </tr>
+                    <tr>
+                        <td><strong>RaptorChat.py</strong></td>
+                        <td>/RaptorChat/RaptorChat.py</td>
+                        <td><span class="badge badge-warning">Subprocess</span></td>
+                        <td>Cross-cluster chat relay maintenance service</td>
+                    </tr>
+                    <tr>
+                        <td><strong>pr_live.py</strong></td>
+                        <td>/pr_live.py</td>
+                        <td><span class="badge badge-info">Web Panel</span></td>
+                        <td>Flask-based web dashboard with Cloudflare tunnel support</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="alert-box warning">
+                <strong>📌 Entry Point Hierarchy:</strong><br>
+                Level 1: <code>main.py</code> (production primary) → Level 2: Mode-specific entries → 
+                Level 3: Bootstrap chain (ConfigManager → ServiceLocator → DiscordClient → on_ready())
+            </div>
+        </section>
+
+        <!-- Systems Section -->
+        <section id="systems" class="section">
+            <div class="section-header">
+                <h2>🔧 Core Module Systems</h2>
+            </div>
+
+            <div class="system-grid">
+                <!-- P0 Critical -->
+                <div class="system-card p0">
+                    <h4>Critical Systems (P0) - Application Stops If Failed</h4>
+                    <ul class="categories-list">
+                        <li>📋 <strong>ConfigManager</strong><br><small><code>config.py</code></small><br>Runtime config + ServerConfig[]</li>
+                        <li>🤖 <strong>DiscordClient</strong><br><small><code>main.py</code></small><br>Bot lifecycle, message routing</li>
+                        <li>🔌 <strong>RCONManager</strong><br><small><code>rcon_manager.py</code></small><br>TCP→RCON protocol execution</li>
+                    </ul>
+                </div>
+
+                <!-- P1 Operational -->
+                <div class="system-card p1">
+                    <h4>Operational Systems (P1) - Manual Override Available</h4>
+                    <ul class="categories-list">
+                        <li>📅 <strong>ScheduleManager</strong><br><small><code>schedule_manager.py</code></small><br>Task queue + timing</li>
+                        <li>💾 <strong>BackupManager</strong><br><small><code>backup_manager.py</code></small><br>Archive creation + retention</li>
+                        <li>📊 <strong>TelemetryManager</strong><br><small><code>telemetry_manager.py</code></small><br>Metrics + state broadcast</li>
+                    </ul>
+                </div>
+
+                <!-- P2 Integration -->
+                <div class="system-card p2">
+                    <h4>Integration Systems (P2) - Manual Workarounds Exist</h4>
+                    <ul class="categories-list">
+                        <li>📦 <strong>VersionManager</strong><br><small><code>version_manager.py</code></small><br>Steam version resolution</li>
+                        <li>🔗 <strong>RaptorChatManager</strong><br><small><code>raptorchat_manager.py</code></small><br>Cross-cluster chat relay</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- Architecture Section -->
+        <section id="architecture" class="section">
+            <div class="section-header">
+                <h2>🏗️ Runtime Architecture</h2>
+            </div>
+
+            <h3>Background Task Supervision</h3>
+            <p>All background tasks are supervised via <code>_run_supervisored()</code> wrapper in <code>main.py</code>:</p>
+
+            <pre><code>async def _run_supervisored(self, coro, task_name):
+    """Run a background task and track its handle for supervision"""
+    try:
+        task = asyncio.create_task(coro)          ← Fire-and-forget
+        task.set_name(task_name)                  ← Naming for logging
+        self.background_tasks.append(task)         ← Global tracking
+
+        # Failure callback registered on creation
+        def _handle_done(t):
+            if t.exception():                      ← Exception detection
+                logger.error_system(f"Task '{task_name}' failed: {t.exception()}")
+
+        task.add_done_callback(_handle_done)       ← Callback registration
+        return task
+    except Exception as e:                         ← Creation failure handling
+        logger.error_system(f"Failed to launch task {task_name}: {e}")</code></pre>
+
+            <h3>Supervised Tasks List</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Task Name</th>
+                            <th>Source</th>
+                            <th>Interval</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Telemetry-Echo</td><td><code>TelemetryManager</code></td><td>10s</td></tr>
+                        <tr><td>Log-Broadcaster</td><td><code>TelemetryManager</code></td><td>2s (Zero-Drift)</td></tr>
+                        <tr><td>Schedule-Runner</td><td><code>ScheduleManager</code></td><td>Event-driven</td></tr>
+                        <tr><td>Autoupdate-Checker</td><td><code>UpdateHandler</code></td><td>Event-driven (if enabled)</td></tr>
+                        <tr><td>RaptorChat-Monitor</td><td><code>RaptorChatManager</code></td><td>Delayed 15s startup</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>Async/Threading Pattern</h3>
+            <pre><code># Blocking operations MUST use asyncio.to_thread()
+result = await asyncio.to_thread(subprocess.run, cmd_args, ...)
+
+# File I/O uses atomic temp file + os.replace() pattern
+def _sync_save(self):
+    temp_file = self.data_file + ".tmp"        # Write to temp first
+    with open(temp_file, 'w') as f:
+        json.dump(self.data, f)                 # Minified JSON for speed
+    os.replace(temp_file, self.data_file)       # Atomic O(1) rename</code></pre>
+
+            <div class="alert-box">
+                <strong>📌 Zero-Drift Log Tailing:</strong> The Log-Broadcaster resumes from the last read position per server, 
+                ensuring no duplicate events and preventing drift across restarts.
+            </div>
+        </section>
+
+        <!-- Commands Section -->
+        <section id="commands" class="section">
+            <div class="section-header">
+                <h2>⌨️ Command Suite (30 Total)</h2>
+            </div>
+
+            <div class="commands-grid">
+                <div class="command-card">
+                    <h5>🔍 System Monitoring</h5>
+                    <code>.status<br>.analytics<br>.diagnose<br>.check [update]<br>.debug on|off</code>
+                </div>
+                <div class="command-card">
+                    <h5>⚙️ Server Control</h5>
+                    <code>.servers<br>.reboot [map]<br>.shutdown [map]<br>.send &lt;target&gt; "&lt;msg&gt;"<br>.cancel</code>
+                </div>
+                <div class="command-card">
+                    <h5>🦖 Update/Patch Management</h5>
+                    <code>.patch<br>.forcepatch<br>.autopatch on|off<br>.schedule add &lt;type&gt; &lt;time&gt;</code>
+                </div>
+                <div class="command-card">
+                    <h5>💾 Backup & Restore</h5>
+                    <code>.backup [all|&lt;map&gt;]<br>.restore [&lt;map&gt;] [index]</code>
+                </div>
+                <div class="command-card">
+                    <h5>👥 Player Management</h5>
+                    <code>.players [list]<br>.kick &lt;player&gt;<br>.ban &lt;player&gt;<br>.unban &lt;player&gt;</code>
+                </div>
+                <div class="command-card">
+                    <h5>🎛️ Configuration</h5>
+                    <code>.webpanel on|off<br>.discord delete H:MM<br>.chat status|reboot|stop<br>.report</code>
+                </div>
+            </div>
+
+            <div class="alert-box" style="margin-top: 15px;">
+                <strong>📌 Command Menu:</strong> Use <code>.menu</code> to open an interactive Discord button grid for quick navigation.
+            </div>
+        </section>
+
+        <!-- Deployment Section -->
+        <section id="deployment" class="section">
+            <div class="section-header">
+                <h2>🚀 Build & Deployment Workflow</h2>
+            </div>
+
+            <h3>Source Installation</h3>
+            <pre><code># 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Run Configurator (generates config.json)
+python Configurator.py
+
+# 3. Launch GUI or bot directly
+python PatchRaptor.py    # GUI mode
+python main.py          # Headless bot mode</code></pre>
+
+            <h3>Compiled Build Artifacts (<code>dist/</code>)</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Artifact</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>PatchRaptor.exe</code></td>
+                            <td>Main application executable (GUI + bot)</td>
+                        </tr>
+                        <tr>
+                            <td><code>Configurator.exe</code></td>
+                            <td>Self-extracting config utility</td>
+                        </tr>
+                        <tr>
+                            <td><code>Instinct.exe</code></td>
+                            <td>Installer builder</td>
+                        </tr>
+                        <tr>
+                            <td><code>RaptorChat.exe</code></td>
+                            <td>Chat relay module executable</td>
+                        </tr>
+                        <tr>
+                            <td><code>WebPanel.exe</code></td>
+                            <td>Web panel executable</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="alert-box warning">
+                <strong>⚠️ Production Environment Reality:</strong><br>
+                • NOT executed on primary dev workstation - Separate Windows 11 production machine<br>
+                • Manual deployment - Direct file copy and execution<br>
+                • No CI/CD pipeline - Manual validation required<br>
+                • Development ≠ Production - Never assume local availability
+            </div>
+
+            <h3 style="margin-top: 25px;">External Integrations</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Integration</th>
+                            <th>Protocol</th>
+                            <th>Connection Type</th>
+                            <th>State Persistence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Discord Bot</td>
+                            <td>WebSocket + REST API</td>
+                            <td>Authenticated session</td>
+                            <td>Client object (in-memory)</td>
+                        </tr>
+                        <tr>
+                            <td>SteamCMD RCON</td>
+                            <td>TCP → RCON</td>
+                            <td>Subprocess per command</td>
+                            <td>None (ephemeral)</td>
+                        </tr>
+                        <tr>
+                            <td>Cloudflare Tunnel</td>
+                            <td>HTTPS tunnel</td>
+                            <td>Background process</td>
+                            <td>Config file path only</td>
+                        </tr>
+                        <tr>
+                            <td>RaptorChat</td>
+                            <td>Custom IPC</td>
+                            <td>Child subprocess</td>
+                            <td>Child process handle + config</td>
+                        </tr>
+                        <tr>
+                            <td>ARK Game Servers</td>
+                            <td>Filesystem</td>
+                            <td>PSUTIL process monitor</td>
+                            <td>.pids JSON tracking file</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-note">
+                <p><strong>PatchRaptor</strong> - Source-available ARK: Survival Ascended server management toolkit</p>
+                <p style="margin-top: 10px;">🔗 <a href="https://github.com/n1Kk085/PatchRaptor">GitHub Repository</a> | 
+                   💬 <a href="https://discord.gg/NmHbruVs56">Discord Support</a> | 
+                   🌐 <a href="https://patchraptor.online">Official Website</a></p>
+                <p style="margin-top: 8px;">Licensed under PATCHRAPTOR LICENSE AGREEMENT - Free for personal & commercial use</p>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>

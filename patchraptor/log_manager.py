@@ -54,8 +54,30 @@ class LogManager:
         discord_logger.setLevel(logging.WARNING)
         
         # Suppress PyNaCl warning message
-        pynacl_logger = logging.getLogger('discord.gateway')
-        pynacl_logger.addFilter(lambda record: 'PyNaCl is not installed' not in record.getMessage())
+        # We apply this specifically to the discord logger and all children
+        class NoisyFilter(logging.Filter):
+            def filter(self, record):
+                msg = record.getMessage()
+                # Suppress both the log version and the warning version
+                if "PyNaCl is not installed" in msg:
+                    return False
+                if "pkg_resources is deprecated" in msg:
+                    return False
+                if "voice will NOT be supported" in msg:
+                    return False
+                return True
+        
+        # Capture all python warnings into the logging system so we can filter them
+        logging.captureWarnings(True)
+        
+        # Apply to root, discord, and py.warnings loggers
+        logging.getLogger().addFilter(NoisyFilter())
+        logging.getLogger('discord').addFilter(NoisyFilter())
+        logging.getLogger('py.warnings').addFilter(NoisyFilter())
+        
+        # FORCE discord logger to ERROR level to prevent the WARNING from even being generated
+        logging.getLogger('discord.client').setLevel(logging.ERROR)
+        logging.getLogger('discord.gateway').setLevel(logging.ERROR)
         
         # Create rotating file handler with 10MB size limit and 10 backup files
         log_file = os.path.join(LOG_PATH, datetime.datetime.now().strftime("patchraptor_%d-%m-%y.log"))
@@ -73,6 +95,7 @@ class LogManager:
         # Configure root logger
         self.root_logger = logging.getLogger()
         self.root_logger.setLevel(logging.INFO)
+        file_handler.addFilter(NoisyFilter())
         self.root_logger.addHandler(file_handler)
         
         # Simple console handler - just use print with flush
@@ -80,7 +103,8 @@ class LogManager:
             def emit(self, record):
                 try:
                     msg = self.format(record)
-                    print(msg, flush=True)
+                    if msg.strip():
+                        print(msg, flush=True)
                 except Exception:
                     pass
         
@@ -89,6 +113,7 @@ class LogManager:
             '%(asctime)s|%(levelname)s|%(message)s',
             datefmt='%d-%m-%y %H:%M:%S'
         ))
+        console_handler.addFilter(NoisyFilter())
         self.root_logger.addHandler(console_handler)
     
     def get_current_log_file(self) -> str:
@@ -220,93 +245,39 @@ class LogManager:
             context.update(stack_context)
         return context
     
-    def debug_player(self, msg: str, **context):
-        """Convenience method for player-related debug messages"""
-        self.log(msg, level="DEBUG", category="PLAYER", context=context)
+    # --- Convenience Category Methods ---
+    def debug_player(self, msg, **ctx): self.log(msg, level="DEBUG", category="PLAYER", context=ctx)
+    def info_player(self, msg, **ctx): self.log(msg, level="INFO", category="PLAYER", context=ctx)
+    def warning_player(self, msg, **ctx): self.log(msg, level="WARNING", category="PLAYER", context=ctx)
+    def error_player(self, msg, **ctx): self.log(msg, level="ERROR", category="PLAYER", context=ctx)
     
-    def info_player(self, msg: str, **context):
-        """Convenience method for player-related info messages"""
-        self.log(msg, level="INFO", category="PLAYER", context=context)
+    def debug_server(self, msg, **ctx): self.log(msg, level="DEBUG", category="SERVER", context=ctx)
+    def info_server(self, msg, **ctx): self.log(msg, level="INFO", category="SERVER", context=ctx)
+    def warning_server(self, msg, **ctx): self.log(msg, level="WARNING", category="SERVER", context=ctx)
+    def error_server(self, msg, **ctx): self.log(msg, level="ERROR", category="SERVER", context=ctx)
     
-    def warning_player(self, msg: str, **context):
-        """Convenience method for player-related warning messages"""
-        self.log(msg, level="WARNING", category="PLAYER", context=context)
+    def debug_system(self, msg, **ctx): self.log(msg, level="DEBUG", category="SYSTEM", context=ctx)
+    def info_system(self, msg, **ctx): self.log(msg, level="INFO", category="SYSTEM", context=ctx)
+    def warning_system(self, msg, **ctx): self.log(msg, level="WARNING", category="SYSTEM", context=ctx)
+    def error_system(self, msg, **ctx): self.log(msg, level="ERROR", category="SYSTEM", context=ctx)
     
-    def error_player(self, msg: str, **context):
-        """Convenience method for player-related error messages"""
-        self.log(msg, level="ERROR", category="PLAYER", context=context)
+    def debug_web(self, msg, **ctx): self.log(msg, level="DEBUG", category="WEB", context=ctx)
+    def info_web(self, msg, **ctx): self.log(msg, level="INFO", category="WEB", context=ctx)
+    def warning_web(self, msg, **ctx): self.log(msg, level="WARNING", category="WEB", context=ctx)
+    def error_web(self, msg, **ctx): self.log(msg, level="ERROR", category="WEB", context=ctx)
     
-    def debug_server(self, msg: str, **context):
-        """Convenience method for server-related debug messages"""
-        self.log(msg, level="DEBUG", category="SERVER", context=context)
+    def debug_discord(self, msg, **ctx): self.log(msg, level="DEBUG", category="DISCORD", context=ctx)
+    def info_discord(self, msg, **ctx): self.log(msg, level="INFO", category="DISCORD", context=ctx)
+    def info_command(self, msg, **ctx): self.log(msg, level="INFO", category="DISCORD", context=ctx)
     
-    def info_server(self, msg: str, **context):
-        """Convenience method for server-related info messages"""
-        self.log(msg, level="INFO", category="SERVER", context=context)
+    def debug_performance(self, msg, **ctx): self.log(msg, level="DEBUG", category="PERFORMANCE", context=ctx)
+    def info_performance(self, msg, **ctx): self.log(msg, level="INFO", category="PERFORMANCE", context=ctx)
     
-    def warning_server(self, msg: str, **context):
-        """Convenience method for server-related warning messages"""
-        self.log(msg, level="WARNING", category="SERVER", context=context)
-    
-    def error_server(self, msg: str, **context):
-        """Convenience method for server-related error messages"""
-        self.log(msg, level="ERROR", category="SERVER", context=context)
-    
-    def debug_performance(self, msg: str, **context):
-        """Convenience method for performance-related debug messages"""
-        self.log(msg, level="DEBUG", category="PERFORMANCE", context=context)
-    
-    def debug_rcon(self, msg: str, **context):
-        """Convenience method for RCON-related debug messages"""
-        self.log(msg, level="DEBUG", category="RCON", context=context)
-    
-    def debug_backup(self, msg: str, **context):
-        """Convenience method for backup-related debug messages"""
-        self.log(msg, level="DEBUG", category="BACKUP", context=context)
-    
-    def debug_discord(self, msg: str, **context):
-        """Convenience method for Discord-related debug messages"""
-        self.log(msg, level="DEBUG", category="DISCORD", context=context)
-    
-    def debug_schedule(self, msg: str, **context):
-        """Convenience method for schedule-related debug messages"""
-        self.log(msg, level="DEBUG", category="SCHEDULE", context=context)
-    
-    def debug_update(self, msg: str, **context):
-        """Convenience method for update-related debug messages"""
-        self.log(msg, level="DEBUG", category="UPDATE", context=context)
-    
-    def debug_config(self, msg: str, **context):
-        """Convenience method for configuration-related debug messages"""
-        self.log(msg, level="DEBUG", category="CONFIG", context=context)
-    
-    def debug_system(self, msg: str, **context):
-        """Convenience method for system-related debug messages"""
-        self.log(msg, level="DEBUG", category="SYSTEM", context=context)
-    
-    def info_performance(self, msg: str, **context):
-        """Convenience method for performance-related info messages"""
-        self.log(msg, level="INFO", category="PERFORMANCE", context=context)
-    
-    def info_system(self, msg: str, **context):
-        """Convenience method for system-related info messages"""
-        self.log(msg, level="INFO", category="SYSTEM", context=context)
-    
-    def info_discord(self, msg: str, **context):
-        """Convenience method for Discord command info messages"""
-        self.log(msg, level="INFO", category="DISCORD", context=context)
-    
-    def info_command(self, msg: str, **context):
-        """Convenience method for command info messages with DISCORD prefix"""
-        self.log(msg, level="INFO", category="DISCORD", context=context)
-    
-    def warning_system(self, msg: str, **context):
-        """Convenience method for system-related warning messages"""
-        self.log(msg, level="WARNING", category="SYSTEM", context=context)
-    
-    def error_system(self, msg: str, **context):
-        """Convenience method for system-related error messages"""
-        self.log(msg, level="ERROR", category="SYSTEM", context=context)
+    def debug_rcon(self, msg, **ctx): self.log(msg, level="DEBUG", category="RCON", context=ctx)
+    def debug_backup(self, msg, **ctx): self.log(msg, level="DEBUG", category="BACKUP", context=ctx)
+    def debug_schedule(self, msg, **ctx): self.log(msg, level="DEBUG", category="SCHEDULE", context=ctx)
+    def debug_update(self, msg, **ctx): self.log(msg, level="DEBUG", category="UPDATE", context=ctx)
+    def debug_config(self, msg, **ctx): self.log(msg, level="DEBUG", category="CONFIG", context=ctx)
     
     def toggle_debug(self) -> bool:
         """Toggle debug logging on/off and return new state"""
@@ -364,28 +335,76 @@ async def execute_steamcmd_simple(cmd_args):
     
     logger.info_system("Starting SteamCMD process...")
     
+    # Try to determine CWD from the steamcmd path
+    cwd = None
+    if cmd_args and os.path.exists(str(cmd_args[0])):
+        cwd = os.path.dirname(os.path.abspath(str(cmd_args[0])))
+        logger.debug_update(f"Setting SteamCMD working directory to: {cwd}")
+
     # Run subprocess in a thread to avoid blocking event loop
     def run_subprocess():
-        return subprocess.run(
-            cmd_args,
-            capture_output=True,
-            text=True,
-            timeout=3600  # 1 hour timeout
+        import subprocess
+        creationflags = 0
+        target_cmd = [str(x) for x in cmd_args]
+        
+        if os.name == 'nt':
+            # Create a dedicated console session to physically simulate a .bat file
+            creationflags = subprocess.CREATE_NEW_CONSOLE
+        # Create the exact command string to mirror a manual batch file - this prevents 
+        # Windows 11 from mangling arguments with extra quotes.
+        # Format: start /wait "Title" "PathToExe" Args
+        exe_path = str(target_cmd[0])
+        
+        # Intelligently quote arguments that contain spaces to ensure shell compatibility
+        processed_args = []
+        for arg in target_cmd[1:]:
+            s_arg = str(arg)
+            if " " in s_arg and not (s_arg.startswith('"') and s_arg.endswith('"')):
+                processed_args.append(f'"{s_arg}"')
+            else:
+                processed_args.append(s_arg)
+        
+        args_str = " ".join(processed_args)
+        
+        # Build the final command string
+        full_cmd = f'start /wait "PatchRaptor SteamCMD" "{exe_path}" {args_str}'
+        logger.debug_update(f"Executing mirrored shell command: {full_cmd}")
+        
+        # Execute using shell=True to allow 'start' to function as a native command
+        result = subprocess.run(
+            full_cmd,
+            cwd=cwd,
+            shell=True,
+            creationflags=creationflags,
+            timeout=7200
         )
+            
+        # Read SteamCMD's *native* generated log file instead of trying to trap it in Python
+        output_txt = ""
+        try:
+            # SteamCMD inherently writes failures to its own root logs folder
+            native_log = os.path.join(cwd if cwd else os.getcwd(), "logs", "stderr.txt")
+            if os.path.exists(native_log):
+                with open(native_log, "r", encoding="utf-8", errors="replace") as read_file:
+                    output_txt = read_file.read()[-3000:] # Last 3000 chars
+        except Exception as e:
+            output_txt = f"Could not extract SteamCMD log tail: {str(e)}"
+            
+        result.stdout = output_txt
+        result.stderr = None
+        return result
     
     # Execute in thread to prevent Discord heartbeat timeouts
     result = await asyncio.to_thread(run_subprocess)
     
-    # Log output after completion (SteamCMD only releases output at the end)
-    if result.stdout:
-        for line in result.stdout.strip().split('\n'):
-            if line.strip():
-                print(line, flush=True)
-    
-    if result.stderr:
-        for line in result.stderr.strip().split('\n'):
-            if line.strip():
-                print(f"ERROR: {line}", flush=True)
+    # Dump the tail logs cleanly so Patchraptor system logs still see success/failure 
+    try:
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    print(line, flush=True)
+    except Exception:
+        pass
     
     return result
 

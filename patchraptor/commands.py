@@ -23,75 +23,34 @@ from .update_management_handler import UpdateManagementHandler
 from .configuration_handler import ConfigurationHandler
 from .schedule_handler import ScheduleHandler
 from .player_manager import PlayerManager
+from .system_utils import SystemUtils
+from .service_locator import ServiceLocator
+from .base_handler import BaseHandler
 
-class CommandHandler:
+class CommandHandler(BaseHandler):
     """Handles Discord bot commands using focused handler classes."""
-    def __init__(
-        self,
-        server_manager: ServerManager,
-        rcon_manager: RCONManager,
-        version_manager: VersionManager,
-        backup_manager: BackupManager,
-        discord_manager: DiscordManager,
-        player_manager: PlayerManager,
-        schedule_manager: ScheduleManager,
-        raptorchat_manager,
-        config_manager: ConfigManager,
-    ):
-        self.server_manager = server_manager
-        self.rcon_manager = rcon_manager
-        self.version_manager = version_manager
-        self.backup_manager = backup_manager
-        self.discord_manager = discord_manager
-        self.player_manager = player_manager
-        self.raptorchat_manager = raptorchat_manager
-        self.schedule_manager = schedule_manager
-        self.config_manager = config_manager
-
-        # Initialize focused handlers
-        self.server_control_handler = ServerControlHandler(
-            server_manager,
-            rcon_manager,
-            discord_manager,
-            player_manager,
-            raptorchat_manager
-        )
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         
-        self.system_monitoring_handler = SystemMonitoringHandler(
-            server_manager, rcon_manager, discord_manager, version_manager, 
-            config_manager, backup_manager, player_manager, schedule_manager, raptorchat_manager
-        )
+        # Initialize focused handlers with injected managers
+        self.server_control_handler = ServerControlHandler(**kwargs)
+        self.system_monitoring_handler = SystemMonitoringHandler(**kwargs)
+        self.backup_restore_handler = BackupRestoreHandler(**kwargs)
+        self.player_management_handler = PlayerManagementHandler(**kwargs)
+        self.update_management_handler = UpdateManagementHandler(**kwargs)
+        self.configuration_handler = ConfigurationHandler(**kwargs)
+        self.schedule_handler = ScheduleHandler(**kwargs)
         
-        self.backup_restore_handler = BackupRestoreHandler(
-            server_manager, rcon_manager, backup_manager, discord_manager, config_manager, raptorchat_manager
-        )
-        
-        self.player_management_handler = PlayerManagementHandler(
-            server_manager, rcon_manager, discord_manager, player_manager
-        )
-        
-        self.update_management_handler = UpdateManagementHandler(
-            server_manager, rcon_manager, version_manager, discord_manager, 
-            config_manager, player_manager, raptorchat_manager
-        )
-        
-        self.configuration_handler = ConfigurationHandler(
-            discord_manager, config_manager, raptorchat_manager
-        )
-        
-        self.schedule_handler = ScheduleHandler(
-            server_manager, discord_manager, schedule_manager
-        )
-        
-        # Update ScheduleManager with focused handler references
-        self.schedule_manager.server_control_handler = self.server_control_handler
-        self.schedule_manager.backup_restore_handler = self.backup_restore_handler
-        self.schedule_manager.update_management_handler = self.update_management_handler
-        self.schedule_manager.raptorchat_manager = raptorchat_manager
+        # Register handlers with ServiceLocator for cross-module access (e.g. ScheduleManager)
+        ServiceLocator.register("ServerControlHandler", self.server_control_handler)
+        ServiceLocator.register("BackupRestoreHandler", self.backup_restore_handler)
+        ServiceLocator.register("UpdateManagementHandler", self.update_management_handler)
+        ServiceLocator.register("ScheduleManager", self.schedule_manager)
 
         # Command routing to focused handlers
         self.commands = {
             ".status": self.system_monitoring_handler.cmd_status,
+            ".analytics": self.system_monitoring_handler.cmd_analytics,
             ".diagnose": self.system_monitoring_handler.cmd_diagnose,
             ".check": self.system_monitoring_handler.cmd_check,
             ".debug": self.system_monitoring_handler.cmd_debug,
@@ -106,17 +65,23 @@ class CommandHandler:
             ".report": self.system_monitoring_handler.cmd_report,
             ".backup": self.backup_restore_handler.cmd_backup,
             ".restore": self.backup_restore_handler.cmd_restore,
-            ".autoupdate": self.update_management_handler.cmd_autoupdate,
-            ".update": self.update_management_handler.cmd_update,
-            ".forceupdate": self.update_management_handler.cmd_forceupdate,
+            ".autopatch": self.update_management_handler.cmd_autopatch,
+            ".patch": self.update_management_handler.cmd_patch,
+            ".forcepatch": self.update_management_handler.cmd_forcepatch,
             ".cancel": self.update_management_handler.cmd_cancel,
             ".send": self.server_control_handler.cmd_send,
             ".schedule": self.schedule_handler.cmd_schedule,
-            ".webhook": self.configuration_handler.cmd_webhook,
             ".chat": self.configuration_handler.cmd_chat,
             ".discord": self.configuration_handler.cmd_discord,
             ".menu": self.cmd_menu,
         }
+
+    async def cleanup(self):
+        """Perform final cleanup of all sub-handlers"""
+        logger.info_system("CommandHandler: Cleaning up sub-handlers...")
+        if self.configuration_handler:
+            await self.configuration_handler.cleanup()
+
 
     async def handle_command(self, message):
         logger.debug_system(f"handle_command called for message: {message.content[:100]}{'...' if len(message.content) > 100 else ''}")
@@ -129,19 +94,7 @@ class CommandHandler:
             logger.debug_system(f"Found exact match for command: '{base}', routing to handler")
             await self.commands[base](message, content, content_lower)
         else:
-            logger.debug_system(f"No exact match found, checking for partial matches")
-            for cmd_key in self.commands:
-                if content_lower.startswith(cmd_key):
-                    logger.debug_system(f"Found partial match: '{cmd_key}' for command: '{content_lower}'")
-                    await self.commands[cmd_key](message, content, content_lower)
-                    break
-            else:
-                logger.debug_system(f"No command handler found for: '{content_lower}'")
-
-
-
-
-
+            logger.debug_system(f"No command handler found for: '{content_lower}'")
 
     async def cmd_menu(self, message, content: str, content_lower: str):
         """Handle .menu command"""
@@ -157,6 +110,7 @@ class CommandHandler:
         logger.debug_system("cmd_menu completed successfully")
 
 
+
 class CommandMenuView(discord.ui.View):
     """Interactive command menu with Discord UI buttons"""
     
@@ -167,18 +121,18 @@ class CommandMenuView(discord.ui.View):
         # Create button layout: 5x2 grid
         left_buttons = [
             ("📊 Server Monitoring", "section_1"),
-            ("🔧 Server Controls", "section_2"),
-            ("🔄 Server Updates", "section_3"),
+            ("🔧 Server Management", "section_2"),
             ("💬 Server Broadcasts", "section_5"),
-            ("🎮 Player Management", "section_9")
+            ("🎮 Player Management", "section_9"),
+            ("🌐 Web Panel Controls", "section_11")
         ]
         
         right_buttons = [
-            ("📡 Webhook Settings", "section_4"),
-            ("💾 Backup System", "section_6"),
-            ("📅 Scheduling", "section_7"),
+            ("🦖 Patch Management", "section_3"),
+            ("📅 Server Automation", "section_7"),
+            ("💾 Backup & Restore", "section_6"),
             ("⚙️ Advanced Settings", "section_8"),
-            ("🦖 RaptorChat", "section_10"),
+            ("🦖 Chat Relay Controls", "section_10"),
         ]
         
         # Add left column buttons
@@ -215,44 +169,55 @@ class CommandMenuView(discord.ui.View):
         embed_data = {
             "section_1": {
                 "title": "📊 Server Monitoring",
-                "commands": "`.status`  - check server status\n`.servers`  - get server details\n`.check`  - check for updates manually\n`.autoupdate`  - shows autoupdate status\n`.autoupdate on|off`  - toggles autoupdate"
+                "description": "Monitor cluster health, resource usage, and player trends.",
+                "commands": "`.status` — View host hardware load and health\n`.servers` — Get live usage and save sizes per map\n`.check` — Query SteamCMD for pending updates\n`.analytics` — View 7-day performance and player trends"
             },
             "section_2": {
                 "title": "🔧 Server Control",
-                "commands": "`.reboot`  - restart all servers\n`.reboot [map]`  - restart specific map\n`.shutdown`  - stop all servers\n`.shutdown [map]`  - stop specific map\n`.cancel`  - cancel ongoing operations"
+                "description": "Control server processes for all maps or specific instances.",
+                "commands": "`.reboot` — Gracefully restart all servers\n`.reboot <map>` — Gracefully restart a specific server\n`.shutdown` — Gracefully stop all servers\n`.shutdown <map>` — Gracefully stop a specific server"
             },
             "section_3": {
-                "title": "🔄 Server Updates",
-                "commands": "`.update`  - schedule a maintenance update\n`.forceupdate`  - immediate server update\n`.check`  - check for available updates"
-            },
-            "section_4": {
-                "title": "📡 Webhook Settings",
-                "commands": "`.webhook get shutdown|reboot`  - view webhook messages\n`.webhook set shutdown|reboot`  - set webhook messages"
+                "title": "🦖 Patch Management",
+                "description": "Manage SteamCMD updates and automated patching.",
+                "commands": "`.patch` — Start graceful patch with countdowns\n`.forcepatch` — Instantly force patch without countdown\n`.patch status` — View current patch configuration\n`.autopatch on|off` — Toggle automatic background updates\n`.cancel` — Abort any active patch sequence",
+                "examples": "Set Countdown: `.patch timer 15` (minutes)\nSet Warning Timing: `.patch intervals 15,10,5,1` (minutes)\nSet In-Game Alert: `.patch broadcast Server shutdown in {minutes} minutes...`\nSet Discord Webhook Announcement: `.patch webhook reboot Patch complete!`"
             },
             "section_5": {
                 "title": "💬 Server Broadcasts",
-                "commands": "`.send all [message]`  - send message to all servers\n`.send [map] [message]`  - send message to specific server"
+                "description": "Send global announcements to in-game players.",
+                "commands": "`.send all <message>` — Broadcast alert to all running servers\n`.send <map> <message>` — Broadcast alert to a specific server"
             },
             "section_6": {
-                "title": "💾 Backup System",
-                "commands": "`.backup all`  - full server backup\n`.backup [map]`  - backup specific map\n`.restore [map]`  - show backup list for map\n`.restore [map] [number]`  - restore specific backup"
+                "title": "💾 Backup & Restore",
+                "description": "Protect and rollback save game archives.",
+                "commands": "`.backup all` — Instantly archive all server data\n`.backup <map>` — Archive data for a specific server\n`.backup amount <num>` — Set number of retained backups\n`.restore <map>` — List archives for a specific server\n`.restore <map> <num>` — Stop, restore archive, and restart"
             },
             "section_7": {
-                "title": "📅 Scheduling System",
-                "commands": "`.schedule`  - view scheduled tasks\n`.schedule add`  - add new task\n`.schedule clear`  - clear all tasks\n`.schedule clear [type]`  - clear specific task type",
-                "examples": "Daily Shutdown: `.schedule add shutdown 03:00` \nWeekly Backup: `.schedule add backup rag tue thu 02:00` \nDaily Reboot: `.schedule add reboot 04:00` \nWeekly Update: `.schedule add update sun 01:00` "
+                "title": "📅 Automation",
+                "description": "Configure recurring maintenance and cluster tasks.",
+                "commands": "`.schedule` — View active scheduled tasks\n`.schedule add` — Create a new task (reboot, patch, backup)\n`.schedule clear` — Remove all scheduled tasks\n`.schedule clear <type>` — Remove tasks of a specific type",
+                "examples": "Daily Shutdown: `.schedule add shutdown 03:00`\nWeekly Backup: `.schedule add backup all 02:00`\nMap Reboot: `.schedule add reboot scorched 04:00`\nWeekly Patch: `.schedule add patch sun 01:00`"
             },
             "section_8": {
                 "title": "⚙️ Advanced Settings",
-                "commands": "`.discord delete 24:00`  - auto-delete messages after 24h\n`.backup amount 10`  - keep 10 backups of each map\n`.webpanel`  - view web panel status\n`.webpanel on|off`  - toggle web panel\n`.report`  - generate log report\n`.diagnose`  - perform a system health check"
+                "description": "System-level configuration and diagnostic tools.",
+                "commands": "`.discord delete <time>` — Set auto-deletion for bot messages\n`.report` — Generate a downloadable system log report\n`.diagnose` — Run internal system health check\n`.debug` — Toggle diagnostic logging mode"
             },
             "section_9": {
                 "title": "🎮 Player Management",
-                "commands": "`.players`  - shows total number of players\n`.players list`  - shows detailed player info\n`.kick <playerID>`  - kick a player from the server\n`.ban <playerID>`  - ban a player from the server\n`.unban <playerID>`  - unban a player from the servers"
+                "description": "Moderate and track players across the cluster.",
+                "commands": "`.players` — Show total active players\n`.players list` — Show detailed player info\n`.kick <player>` — Disconnect player from all servers\n`.ban <player>` — Ban player across cluster (Name or ID)\n`.unban <player>` — Lift ban across cluster (Name or ID)"
             },
             "section_10": {
-                "title": "🦖 RaptorChat",
-                "commands": "`.chat status`  - shows status of chat relay\n`.chat reboot`  - restarts chat relay\n`.chat stop`  - stop chat relay"
+                "title": "🦖 Chat Relay",
+                "description": "Manage the chat relay and telemetry system.",
+                "commands": "`.chat status` — View health of the chat relay\n`.chat reboot` — Forcefully restart the relay service\n`.chat stop` — Disconnect the chat relay"
+            },
+            "section_11": {
+                "title": "🌐 Web Panel",
+                "description": "Control the management interface and secure tunnel.",
+                "commands": "`.webpanel` — View tunnel URL and connection status\n`.webpanel on` — Launch web server and open tunnel\n`.webpanel off` — Shut down web server and close tunnel"
             }
         }
         
@@ -287,3 +252,5 @@ class CommandMenuView(discord.ui.View):
             logger.debug_system("All buttons disabled due to timeout")
         except Exception as e:
             logger.error_system(f"Error in on_timeout: {e}")
+
+

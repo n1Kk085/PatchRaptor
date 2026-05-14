@@ -2,6 +2,15 @@ import pytest
 from unittest.mock import MagicMock, patch, mock_open
 import json
 import base64
+import os
+import sys
+
+# Setup path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 import pr_live
 
 # Helper to create a test client
@@ -9,9 +18,6 @@ import pr_live
 def client():
     # Patch dependencies to prevent side effects during init
     with patch('pr_live.ConfigManager'), \
-         patch('pr_live.PlayerManager'), \
-         patch('pr_live.UptimeTracker'), \
-         patch('pr_live.PlayerStatsTracker'), \
          patch('pr_live.ServerStatusCache'), \
          patch('pr_live.MapImageResolver'), \
          patch('pr_live.asyncio.new_event_loop'), \
@@ -69,20 +75,14 @@ def test_me_endpoint(client):
     assert response.json['username'] == 'admin'
 
 def test_favicon(client):
-    response = client.get('/favicon.ico')
-    assert response.status_code == 200
-    assert response.mimetype == 'image/x-icon'
+    with patch('pr_live.send_from_directory') as mock_send:
+        mock_send.return_value = "Favicon"
+        response = client.get('/favicon.ico')
+        assert response.status_code == 200
 
-def test_no_auth_configured(client):
-    # To test "no auth", we need to modify the panel instance associated with the client
-    # but the client is created from the app.
-    # The app view functions capture 'self' (the panel instance).
-    
+def test_no_auth_configured():
     # Rerecreating fixture logic locally for this specific test case
     with patch('pr_live.ConfigManager'), \
-         patch('pr_live.PlayerManager'), \
-         patch('pr_live.UptimeTracker'), \
-         patch('pr_live.PlayerStatsTracker'), \
          patch('pr_live.ServerStatusCache'), \
          patch('pr_live.MapImageResolver'), \
          patch('pr_live.asyncio.new_event_loop'), \

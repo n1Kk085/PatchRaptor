@@ -1,0 +1,125 @@
+flowchart TD
+    %% ==========================================
+    %% STYLING DEFINITIONS
+    %% ==========================================
+    classDef external fill:#424242,stroke:#212121,color:#ffffff,stroke-width:2px,rx:10px,ry:10px
+    classDef entry fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2px,font-weight:bold
+    classDef router fill:#c62828,stroke:#b71c1c,color:#ffffff,stroke-width:2px,rx:5px,ry:5px
+    classDef handler fill:#ef6c00,stroke:#e65100,color:#ffffff,stroke-width:2px
+    classDef manager fill:#1565c0,stroke:#0d47a1,color:#ffffff,stroke-width:2px
+    classDef bgTask fill:#6a1b9a,stroke:#4a148c,color:#ffffff,stroke-width:2px,stroke-dasharray: 5 5
+
+    %% ==========================================
+    %% EXTERNAL USERS & APIs
+    %% ==========================================
+    DiscordAPI((Discord API)):::external
+    Admin((Server Admin)):::external
+
+    %% ==========================================
+    %% LEVEL 1: ENTRY POINTS
+    %% ==========================================
+    subgraph EntryPoints [Level 1: Entry Points]
+        direction TB
+        Main[main.py<br/>Discord Bot]:::entry
+        WebPanel[pr_live.py<br/>Web Panel]:::entry
+        ChatRelay[RaptorChat.py<br/>Chat Bridge]:::entry
+        GuiWrap[PatchRaptor.py<br/>GUI Wrapper]:::entry
+    end
+
+    %% ==========================================
+    %% LEVEL 2: COMMAND ROUTING & HANDLERS
+    %% ==========================================
+    subgraph LogicLayer [Level 2: Routing & Handlers]
+        direction TB
+        CmdRouter{CommandHandler}:::router
+        
+        SysMonitor[System Monitoring<br/>.status, .analytics]:::handler
+        SrvControl[Server Control<br/>.reboot, .send]:::handler
+        UpdManage[Update Management<br/>.patch, .autopatch]:::handler
+        BkManage[Backup & Restore<br/>.backup, .restore]:::handler
+        PlyManage[Player Management<br/>.kick, .ban]:::handler
+        CfgManage[Configuration<br/>.webpanel, .schedule]:::handler
+    end
+
+    %% ==========================================
+    %% LEVEL 3: CORE MANAGERS (Service Locator)
+    %% ==========================================
+    subgraph CoreManagers [Level 3: Core Managers]
+        direction TB
+        ConfMgr[ConfigManager]:::manager
+        TeleMgr[TelemetryManager<br/>Master Collector]:::manager
+        RconMgr[RCONManager]:::manager
+        SchedMgr[ScheduleManager]:::manager
+        BkMgr[BackupManager]:::manager
+        VerMgr[VersionManager]:::manager
+        PlyMgr[PlayerManager]:::manager
+    end
+
+    %% ==========================================
+    %% BACKGROUND TASKS (Supervised)
+    %% ==========================================
+    subgraph BackgroundTasks [Supervised Background Tasks]
+        direction LR
+        TaskTelemetry(Telemetry Echo):::bgTask
+        TaskLogs(Log Broadcaster):::bgTask
+        TaskSchedule(Schedule Runner):::bgTask
+        TaskUpdates(AutoPatch Checker):::bgTask
+    end
+
+    %% ==========================================
+    %% LEVEL 4: INFRASTRUCTURE & TARGETS
+    %% ==========================================
+    subgraph Infrastructure [Level 4: Game Servers & Network]
+        direction LR
+        ArkServers[(ARK Game Servers<br/>Local File System)]:::external
+        SteamCMD[SteamCMD]:::external
+        CFTunnel[Cloudflare Tunnel]:::external
+    end
+
+    %% ==========================================
+    %% RELATIONSHIPS & DATA FLOW
+    %% ==========================================
+    
+    %% Users to Entry Points
+    Admin <-->|Interacts via Chat| DiscordAPI
+    Admin <-->|Web Browser| WebPanel
+    DiscordAPI <-->|Webhooks / Events| Main
+
+    %% Entry Points to Routers
+    Main -->|Routes Discord Messages| CmdRouter
+
+    %% Router to Specific Handlers
+    CmdRouter --> SysMonitor
+    CmdRouter --> SrvControl
+    CmdRouter --> UpdManage
+    CmdRouter --> BkManage
+    CmdRouter --> PlyManage
+    CmdRouter --> CfgManage
+
+    %% Handlers accessing Core Managers
+    SysMonitor -->|Read Stats| TeleMgr
+    SrvControl -->|Issue Commands| RconMgr
+    UpdManage -->|Check Versions| VerMgr
+    BkManage -->|Create Archives| BkMgr
+    PlyManage -->|Update Whitelists| PlyMgr
+    CfgManage -->|Modify settings| ConfMgr
+
+    %% Background Tasks Triggers
+    Main -.->|Spawns & Supervises| TaskTelemetry
+    Main -.->|Spawns & Supervises| TaskLogs
+    Main -.->|Spawns & Supervises| TaskSchedule
+    Main -.->|Spawns & Supervises| TaskUpdates
+
+    TaskTelemetry -.->|Broadcasts| DiscordAPI
+    TaskSchedule -->|Triggers| SrvControl
+    TaskUpdates -->|Triggers| UpdManage
+
+    %% Managers to Infrastructure
+    RconMgr -->|TCP RCON Protocol| ArkServers
+    BkMgr -->|Disk ZIP Operations| ArkServers
+    VerMgr -->|Query Updates| SteamCMD
+    TeleMgr -->|Parses Logs & PIDs| ArkServers
+    
+    TeleMgr -->|Writes cluster_live.json| CFTunnel
+    WebPanel -->|Reads cluster_live.json| CFTunnel
+    ChatRelay <-->|Cross-cluster IPC| ArkServers

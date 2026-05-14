@@ -121,17 +121,17 @@ class TestGetLatestBuildId:
         '''
         mock_result.stderr = ""
         
-        with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=mock_result):
+        with patch('patchraptor.version_manager.subprocess.run', return_value=mock_result) as mock_run:
             build_id = await version_manager.get_latest_build_id()
             
             assert build_id == "15678901"
+            mock_run.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_get_latest_build_id_timeout(self, version_manager):
         """Test timeout handling."""
-        with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError()):
+        with patch('asyncio.to_thread', side_effect=asyncio.TimeoutError):
             build_id = await version_manager.get_latest_build_id()
-            
             assert build_id is None
     
     @pytest.mark.asyncio
@@ -142,10 +142,11 @@ class TestGetLatestBuildId:
         mock_result.stdout = ""
         mock_result.stderr = "Error: Failed to connect"
         
-        with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=mock_result):
+        with patch('patchraptor.version_manager.subprocess.run', return_value=mock_result) as mock_run:
             build_id = await version_manager.get_latest_build_id()
             
             assert build_id is None
+            mock_run.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_get_latest_build_id_auth_failed(self, version_manager):
@@ -155,10 +156,11 @@ class TestGetLatestBuildId:
         mock_result.stdout = ""
         mock_result.stderr = "Not logged in"
         
-        with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=mock_result):
+        with patch('patchraptor.version_manager.subprocess.run', return_value=mock_result) as mock_run:
             build_id = await version_manager.get_latest_build_id()
             
             assert build_id is None
+            mock_run.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_get_latest_build_id_parse_error(self, version_manager):
@@ -168,10 +170,11 @@ class TestGetLatestBuildId:
         mock_result.stdout = "Invalid output with no build ID"
         mock_result.stderr = ""
         
-        with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=mock_result):
+        with patch('patchraptor.version_manager.subprocess.run', return_value=mock_result) as mock_run:
             build_id = await version_manager.get_latest_build_id()
             
             assert build_id is None
+            mock_run.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_get_latest_build_id_whitespace_parsing(self, version_manager):
@@ -183,10 +186,11 @@ class TestGetLatestBuildId:
         '''
         mock_result.stderr = ""
         
-        with patch('asyncio.to_thread', new_callable=AsyncMock, return_value=mock_result):
+        with patch('patchraptor.version_manager.subprocess.run', return_value=mock_result) as mock_run:
             build_id = await version_manager.get_latest_build_id()
             
             assert build_id == "15678901"
+            mock_run.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_get_latest_build_id_exception(self, version_manager):

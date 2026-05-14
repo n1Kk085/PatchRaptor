@@ -26,7 +26,8 @@ class ConfigManager:
         logger.debug_config("Configuration loaded successfully")
         logger.debug_config("Validating configuration...")
         self._validate_config()
-        logger.debug_config("Configuration validation completed")
+        self._ensure_defaults()
+        logger.debug_config("Configuration validation and defaults check completed")
         logger.debug_config("ConfigManager initialization completed successfully")
         
     def _load_config(self) -> Dict[str, Any]:
@@ -80,7 +81,40 @@ class ConfigManager:
             logger.debug_config(f"Validation failed - missing keys: {missing}")
             raise ValueError(f"Missing required config keys: {missing}")
         logger.debug_config("Configuration validation passed - all required keys present")
-    
+        
+    def _ensure_defaults(self):
+        """Ensure core default settings exist in the configuration"""
+        updated = False
+        
+        # Default Patch Settings
+        if "patch_settings" not in self.config:
+            self.config["patch_settings"] = {
+                "timer": 15,
+                "broadcast": "Servers will be shutting down for maintenance in {minutes} minutes",
+                "intervals": [15, 10, 5, 1]
+            }
+            updated = True
+        else:
+            # Migration: Rename 'message' to 'broadcast' if it exists
+            if "message" in self.config["patch_settings"]:
+                self.config["patch_settings"]["broadcast"] = self.config["patch_settings"].pop("message")
+                updated = True
+                
+            # Ensure all sub-keys exist
+            patch_defaults = {
+                "timer": 15,
+                "broadcast": "Servers will be shutting down for maintenance in {minutes} minutes",
+                "intervals": [15, 10, 5, 1]
+            }
+            for key, val in patch_defaults.items():
+                if key not in self.config["patch_settings"]:
+                    self.config["patch_settings"][key] = val
+                    updated = True
+                    
+        if updated:
+            logger.info_system("Populating missing default settings in config.json...")
+            self.save()
+        
     def get(self, key: str, default=None):
         """Get configuration value with optional default"""
         return self.config.get(key, default)

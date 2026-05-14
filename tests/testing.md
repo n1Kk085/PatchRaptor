@@ -7,20 +7,20 @@ This document explains how to test PatchRaptor to ensure stability and reliabili
 ### 1. Install Dependencies
 Before running tests, ensure you have the development requirements installed:
 ```bash
-pip install -r requirements-dev.txt
+pip install -r tests\requirements-dev.txt
 ```
 
 ### 2. Run All Tests
 To run the full test suite and verify everything is working:
 ```bash
-run_tests.bat
+tests\run_tests.bat
 ```
 *This executes `pytest -v` to show detailed pass/fail results for each test.*
 
 ### 3. Run Tests with Coverage
 To see how much of the code is actually being tested:
 ```bash
-run_tests_with_coverage.bat
+tests\run_tests_with_coverage.bat
 ```
 *This runs the tests and generates an HTML report showing exactly which lines of code were executed.*
 

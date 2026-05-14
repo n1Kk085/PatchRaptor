@@ -82,6 +82,6 @@ def test_long_running_operation():
 - ✅ Config loading and validation
 - ✅ Player ban management
 - ✅ Pause/resume functionality
-- ⚠️ TODO: Server management
-- ⚠️ TODO: Update management
-- ⚠️ TODO: Discord commands
+- ✅ Server management (Verified)
+- ✅ Update management (Verified)
+- ✅ Discord commands (Verified)

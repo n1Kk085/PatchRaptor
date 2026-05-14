@@ -30,15 +30,16 @@ class RCONManager:
         
         # Allow specific safe RCON commands used in the codebase
         safe_patterns = [
-            r'^GetGameLog$',            # Get game log
-            r'^SaveWorld$',             # Save world command
-            r'^ShowPlayers$',           # Show players command
-            r'^ServerChat .+$',         # ServerChat with any message
-            r'^KickPlayer .+$',         # KickPlayer with player name
-            r'^BanPlayer .+$',          # BanPlayer with player name
-            r'^UnbanPlayer .+$',        # UnbanPlayer with player name/ID
-            r'^ListPlayers$',           # List players command
-            r'^DoExit$',                # Server shutdown command
+            r'^GetGameLog$',             # Get game log
+            r'^SaveWorld$',              # Save world command
+            r'^GetVersion$',             # Get server version (diagnose)
+            r'^ShowPlayers$',            # Show players command
+            r'^ServerChat .+$',          # ServerChat with any message
+            r'^KickPlayer .+$',          # KickPlayer with player name
+            r'^BanPlayer .+$',           # BanPlayer with player name
+            r'^UnbanPlayer .+$',         # UnbanPlayer with player name/ID
+            r'^ListPlayers$',            # List players command
+            r'^DoExit$',                 # Server shutdown command
         ]
         for pattern in safe_patterns:
             if re.match(pattern, cmd):
@@ -98,24 +99,41 @@ class RCONManager:
                 # Check for RCON exception pattern in stdout
                 stdout_content = result.stdout.strip()
                 logger.debug_rcon(f"DoExit stdout: {stdout_content[:200]}...")
-                if "RCON Exception" in stdout_content or "One or more errors occurred" in stdout_content:
-                    logger.debug_rcon(f"DoExit detected RCON exception in output")
+                
+                # Fortified check: if it exited non-zero and gave no output, it silently failed.
+                if result.returncode != 0 and not stdout_content:
+                    logger.debug_rcon(f"DoExit failed silently (Code {result.returncode}, empty output)")
+                    raise RCONCommandError(cmd, f"{ip}:{port}", "Silent timeout or connection failure")
+                
+                # Broaden failure keyword search
+                stdout_lower = stdout_content.lower()
+                if "rcon exception" in stdout_lower or "one or more errors occurred" in stdout_lower or "timed out" in stdout_lower or "connection refused" in stdout_lower:
+                    logger.debug_rcon(f"DoExit detected RCON exception or timeout in output")
                     raise RCONCommandError(cmd, f"{ip}:{port}", stdout_content)
                 
                 logger.debug_rcon(f"DoExit command successful")
                 return stdout_content
             else:
                 logger.debug_rcon(f"Executing regular RCON command")
+                
+                # Command-specific timeout configuration
+                if cmd == "SaveWorld":
+                    timeout_sec = 300   # Increased to 5 minutes to support slow-booting servers
+                else:
+                    timeout_sec = 30   # Standard commands (chat, kick, etc.)
+
                 result = await asyncio.to_thread(
                     subprocess.run,
                     cmd_args,
                     shell=False,
                     capture_output=True,
                     text=True,
-                    check=True  # Use check=True for other commands
+                    check=True,  # Use check=True for other commands
+                    timeout=timeout_sec
                 )
+                
                 execution_time = time.time() - start_time
-                logger.debug_rcon(f"RCON execution time: {execution_time:.2f}s")
+                logger.debug_rcon(f"RCON {cmd} execution time: {execution_time:.2f}s (timeout limit: {timeout_sec}s)")
                 
                 if result.stderr:
                     logger.debug_rcon(f"RCON stderr: {result.stderr.strip()}")
@@ -126,6 +144,15 @@ class RCONManager:
                 logger.debug_rcon(f"RCON command successful")
                 return stdout_content
             
+        except subprocess.TimeoutExpired:
+            execution_time = time.time() - start_time
+            # Determine which timeout limit was hit
+            if cmd == "SaveWorld":
+                timeout_limit = 300
+            else:
+                timeout_limit = 30
+            logger.error_system(f"RCON command '{cmd}' timed out after {execution_time:.2f}s (timeout limit: {timeout_limit}s). This may indicate high server load, disk I/O saturation, or network issues.")
+            raise RCONCommandError(cmd, f"{ip}:{port}", f"RCON command timed out ({cmd} requires more time to complete under current load)")
         except subprocess.CalledProcessError as e:
             execution_time = time.time() - start_time
             error_msg = e.stderr.strip() if e.stderr else f"Process exited with code {e.returncode}"

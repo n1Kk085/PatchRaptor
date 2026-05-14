@@ -4,7 +4,6 @@ __all__ = [
     "models",
     "config",
     "log_manager",
-    "license_manager",
     "version_manager",
     "raptorchat_manager",
     "server_manager",

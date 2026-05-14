@@ -82,7 +82,7 @@ class TestRateLimiting:
         assert not logger._is_rate_limited("Test", "INFO")
         assert not logger._is_rate_limited("Test", "INFO")
         
-        # Third should be rate limited
+        # Verifies rate limiting on third attempt.
         assert logger._is_rate_limited("Test", "INFO")
     
     def test_rate_limiting_resets(self, logger):

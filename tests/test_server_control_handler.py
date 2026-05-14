@@ -10,6 +10,11 @@ class TestServerControlHandler:
     def mock_server_manager(self):
         sm = Mock()
         sm.servers = []
+        sm.get_display_name = Mock(return_value="The Island")
+        sm.is_specific_server_running = Mock(return_value=True)
+        sm.start_server = Mock()
+        sm.wait_for_server_shutdown = AsyncMock(return_value=True)
+        sm.wait_for_servers_online = AsyncMock(return_value=True)
         return sm
 
     @pytest.fixture
@@ -40,16 +45,45 @@ class TestServerControlHandler:
         rcm.is_running = Mock(return_value=True)
         rcm.stop = Mock()
         rcm.start = Mock()
+        rcm.start_with_delay = AsyncMock(return_value=True)
+        rcm.start_maintenance = Mock()
+        rcm.end_maintenance = Mock()
+        
+        # Mock maintenance_scope async context manager
+        scope_mock = MagicMock()
+        scope_mock.__aenter__ = AsyncMock()
+        scope_mock.__aexit__ = AsyncMock()
+        rcm.maintenance_scope = MagicMock(return_value=scope_mock)
+        
         return rcm
 
     @pytest.fixture
-    def handler(self, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_player_manager, mock_raptorchat_manager):
+    def mock_telemetry_manager(self):
+        tm = Mock()
+        tm.current_state = Mock()
+        tm.current_state.servers = []
+        tm.reset = AsyncMock()
+        tm.trigger_log_file_detection_on_restart = AsyncMock()
+        tm.get_diagnostics = AsyncMock(return_value={
+            'uptime_pc': '1d 2h',
+            'cpu_usage': 15.5,
+            'ram_used': 8.0,
+            'ram_total': 16.0,
+            'disk_info': {'used': 100, 'total': 500, 'percent': 20},
+            'results': ['All good'],
+            'issues': []
+        })
+        return tm
+
+    @pytest.fixture
+    def handler(self, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_player_manager, mock_raptorchat_manager, mock_telemetry_manager):
         return ServerControlHandler(
-            mock_server_manager,
-            mock_rcon_manager,
-            mock_discord_manager,
-            mock_player_manager,
-            mock_raptorchat_manager
+            server_manager=mock_server_manager,
+            rcon_manager=mock_rcon_manager,
+            discord_manager=mock_discord_manager,
+            player_manager=mock_player_manager,
+            raptorchat_manager=mock_raptorchat_manager,
+            telemetry_manager=mock_telemetry_manager
         )
 
     @pytest.fixture
@@ -68,28 +102,6 @@ class TestServerControlHandler:
         message.channel = Mock()
         return message
 
-    @pytest.mark.asyncio
-    async def test_wait_for_servers_online_success(self, handler, mock_server_manager, mock_rcon_manager, mock_server):
-        """Test waiting for servers to come online successfully"""
-        mock_server_manager.is_specific_server_running.return_value = True
-        mock_rcon_manager.execute_for_server.return_value = "World Saved" # Simulate successful SaveWorld
-        
-        result = await handler._wait_for_servers_online([mock_server], timeout=1, check_interval=0.1)
-        
-        assert result is True
-        mock_server_manager.is_specific_server_running.assert_called_with(mock_server)
-        mock_rcon_manager.execute_for_server.assert_called_with(mock_server, "SaveWorld")
-
-    @pytest.mark.asyncio
-    async def test_wait_for_servers_online_timeout(self, handler, mock_server_manager, mock_server):
-        """Test timeout when waiting for servers"""
-        mock_server_manager.is_specific_server_running.return_value = False
-        
-        # Override sleep to run fast
-        with patch('asyncio.sleep', new_callable=AsyncMock):
-            result = await handler._wait_for_servers_online([mock_server], timeout=0.2, check_interval=0.1)
-        
-        assert result is False
 
     @pytest.mark.asyncio
     async def test_cmd_shutdown_all(self, handler, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_raptorchat_manager, mock_server, mock_message):
@@ -100,7 +112,7 @@ class TestServerControlHandler:
         await handler.cmd_shutdown(mock_message, ".shutdown", ".shutdown")
         
         # Verify message sent
-        mock_discord_manager.send_temp_message.assert_any_call(mock_message.channel, "⏹️ Shutting down all servers...")
+        assert any("Pausing Telemetry and Chat Relay" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
         
         # Verify RaptorChat stopped
         mock_raptorchat_manager.stop.assert_called_once()
@@ -144,6 +156,41 @@ class TestServerControlHandler:
         handler._delayed_raptorchat_restart.assert_called()
 
     @pytest.mark.asyncio
+    async def test_cmd_reboot_all_offline_starts_servers(self, handler, mock_server_manager, mock_rcon_manager, mock_player_manager, mock_raptorchat_manager, mock_server, mock_message):
+        """Test .reboot when no servers are currently running still starts all configured servers"""
+        mock_server_manager.servers = [mock_server]
+        mock_server_manager.is_specific_server_running.return_value = False
+        mock_server_manager.wait_for_server_shutdown = AsyncMock(return_value=True)
+        mock_server_manager.wait_for_servers_online = AsyncMock(return_value=True)
+        handler._restart_all_servers = AsyncMock()
+        handler._delayed_raptorchat_restart = AsyncMock()
+
+        await handler.cmd_reboot(mock_message, ".reboot", ".reboot")
+
+        mock_rcon_manager.execute_for_server.assert_not_called()
+        handler._restart_all_servers.assert_called_once()
+        handler._delayed_raptorchat_restart.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_cmd_reboot_specific_server_offline_starts_server(self, handler, mock_server_manager, mock_rcon_manager, mock_server, mock_message):
+        """Test .reboot specific server starts it when the server is currently offline"""
+        mock_server_manager.find_server.return_value = mock_server
+        mock_server_manager.get_display_name.return_value = "The Island"
+        mock_server_manager.is_specific_server_running.return_value = False
+        mock_server_manager.wait_for_server_shutdown = AsyncMock(return_value=True)
+        mock_server_manager.wait_for_servers_online = AsyncMock(return_value=True)
+
+        handler._restart_one_server = AsyncMock()
+        handler._wait_for_servers_online = AsyncMock(return_value=True)
+        handler._delayed_raptorchat_restart = AsyncMock()
+
+        await handler.cmd_reboot(mock_message, ".reboot TheIsland", ".reboot theisland")
+
+        mock_server_manager.find_server.assert_called_with("TheIsland")
+        mock_rcon_manager.execute_for_server.assert_not_called()
+        handler._restart_one_server.assert_called_once_with(mock_server, mock_message)
+
+    @pytest.mark.asyncio
     async def test_cmd_reboot_specific_server(self, handler, mock_server_manager, mock_rcon_manager, mock_server, mock_message):
         """Test .reboot command for a specific server (TheIsland)"""
         mock_server_manager.find_server.return_value = mock_server
@@ -173,7 +220,7 @@ class TestServerControlHandler:
         mock_rcon_manager.execute_for_server.assert_called_with(mock_server, "ServerChat Hello World")
 
     @pytest.mark.asyncio
-    async def test_cmd_servers_parsing(self, handler, mock_server_manager, mock_server, mock_message, mock_discord_manager):
+    async def test_cmd_servers_parsing(self, handler, mock_server_manager, mock_telemetry_manager, mock_server, mock_message, mock_discord_manager):
         """Test .servers command parsing of psutil processes"""
         mock_server_manager.servers = [mock_server]
         mock_server_manager.get_display_name.return_value = "The Island"
@@ -194,14 +241,39 @@ class TestServerControlHandler:
              patch('os.walk', return_value=[]), \
              patch('psutil.disk_usage', return_value=MagicMock(total=100, used=50)): 
              
+             # Ensure servers list is populated BEFORE call
+             mock_server_manager.servers = [mock_server]
+             mock_server_manager.get_display_name.return_value = "The Island"
+             mock_server_manager.get_server_process.return_value = mock_proc
+             
+             # Populate telemetry state
+             mock_telemetry_manager.current_state.servers = [{
+                 'name': 'TestServer',
+                 'status': 'online',
+                 'playerCount': 5,
+                 'cpu': 10,
+                 'ram': 4.5
+             }]
+             
              await handler.cmd_servers(mock_message, ".servers", ".servers")
              
-        # Verify output contains key info
-        args, _ = mock_discord_manager.send_temp_message.call_args
-        message_content = args[1]
-        assert "The Island" in message_content
-        assert "Process CPU" in message_content
-        assert "Process RAM" in message_content
+        # Verify output contains key info in embed
+        _, kwargs = mock_discord_manager.send_temp_message.call_args
+        embed = kwargs.get('embed')
+        assert embed is not None
+        assert "Server Details" in embed.title
+        
+        # Verify output contains key info in embed description
+        _, kwargs = mock_discord_manager.send_temp_message.call_args
+        embed = kwargs.get('embed')
+        assert embed is not None
+        assert "Server Details" in embed.title
+        
+        description = embed.description
+        assert "The Island" in description
+        assert "Online" in description
+        assert "Process CPU" in description
+        assert "Process RAM" in description
 
 
 class TestServerControlHandlerErrorHandling:
@@ -211,6 +283,11 @@ class TestServerControlHandlerErrorHandling:
     def mock_server_manager(self):
         sm = Mock()
         sm.servers = []
+        sm.get_display_name = Mock(return_value="The Island")
+        sm.is_specific_server_running = Mock(return_value=True)
+        sm.start_server = Mock()
+        sm.wait_for_server_shutdown = AsyncMock(return_value=True)
+        sm.wait_for_servers_online = AsyncMock(return_value=True)
         return sm
 
     @pytest.fixture
@@ -241,16 +318,45 @@ class TestServerControlHandlerErrorHandling:
         rcm.is_running = Mock(return_value=True)
         rcm.stop = Mock()
         rcm.start = Mock()
+        rcm.start_with_delay = AsyncMock(return_value=True)
+        rcm.start_maintenance = Mock()
+        rcm.end_maintenance = Mock()
+        
+        # Mock maintenance_scope async context manager
+        scope_mock = MagicMock()
+        scope_mock.__aenter__ = AsyncMock()
+        scope_mock.__aexit__ = AsyncMock()
+        rcm.maintenance_scope = MagicMock(return_value=scope_mock)
+        
         return rcm
 
     @pytest.fixture
-    def handler(self, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_player_manager, mock_raptorchat_manager):
+    def mock_telemetry_manager(self):
+        tm = Mock()
+        tm.current_state = Mock()
+        tm.current_state.servers = []
+        tm.reset = AsyncMock()
+        tm.trigger_log_file_detection_on_restart = AsyncMock()
+        tm.get_diagnostics = AsyncMock(return_value={
+            'uptime_pc': '1d 2h',
+            'cpu_usage': 15.5,
+            'ram_used': 8.0,
+            'ram_total': 16.0,
+            'disk_info': {'used': 100, 'total': 500, 'percent': 20},
+            'results': ['All good'],
+            'issues': []
+        })
+        return tm
+
+    @pytest.fixture
+    def handler(self, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_player_manager, mock_raptorchat_manager, mock_telemetry_manager):
         return ServerControlHandler(
-            mock_server_manager,
-            mock_rcon_manager,
-            mock_discord_manager,
-            mock_player_manager,
-            mock_raptorchat_manager
+            server_manager=mock_server_manager,
+            rcon_manager=mock_rcon_manager,
+            discord_manager=mock_discord_manager,
+            player_manager=mock_player_manager,
+            raptorchat_manager=mock_raptorchat_manager,
+            telemetry_manager=mock_telemetry_manager
         )
 
     @pytest.fixture
@@ -269,16 +375,6 @@ class TestServerControlHandlerErrorHandling:
         message.channel = Mock()
         return message
 
-    @pytest.mark.asyncio
-    async def test_wait_for_servers_rcon_error(self, handler, mock_server_manager, mock_rcon_manager, mock_server):
-        """Test _wait_for_servers_online handles RCON errors."""
-        mock_server_manager.is_specific_server_running.return_value = True
-        mock_rcon_manager.execute_for_server.side_effect = RCONConnectionError("TestServer", "Connection failed")
-        
-        with patch('asyncio.sleep', new_callable=AsyncMock):
-            result = await handler._wait_for_servers_online([mock_server], timeout=0.2, check_interval=0.1)
-        
-        assert result is False
 
     @pytest.mark.asyncio
     async def test_cmd_reboot_raptorchat_stop_error(self, handler, mock_server_manager, mock_raptorchat_manager, mock_discord_manager, mock_message):
@@ -337,7 +433,7 @@ class TestServerControlHandlerErrorHandling:
         await handler.cmd_shutdown(mock_message, ".shutdown TheIsland", ".shutdown theisland")
         
         # Verify message sent
-        assert any("Shutting down The Island" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
+        assert any("Sending shutdown command" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
         
         # Verify DoExit sent
         mock_rcon_manager.execute_for_server.assert_called_with(mock_server, "DoExit")
@@ -374,8 +470,9 @@ class TestServerControlHandlerErrorHandling:
         
         await handler.cmd_shutdown(mock_message, ".shutdown TheIsland", ".shutdown theisland")
         
-        # Should send timeout warning
-        assert any("Timeout waiting" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
+        # Should send Ghost Recovery message
+        assert any("Initiating Ghost Recovery" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
+        mock_server_manager.force_stop_server.assert_called_with(mock_server)
 
     @pytest.mark.asyncio
     async def test_cmd_shutdown_all_rcon_errors(self, handler, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_server, mock_message):
@@ -387,7 +484,7 @@ class TestServerControlHandlerErrorHandling:
         await handler.cmd_shutdown(mock_message, ".shutdown", ".shutdown")
         
         # Should send error message but continue
-        assert any("Failed to send DoExit" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
+        assert any("Failed to send shutdown" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
 
     @pytest.mark.asyncio
     async def test_cmd_shutdown_all_timeout(self, handler, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_server, mock_message):
@@ -397,8 +494,9 @@ class TestServerControlHandlerErrorHandling:
         
         await handler.cmd_shutdown(mock_message, ".shutdown", ".shutdown")
         
-        # Should send warning about improper shutdown
-        assert any("may not have shut down properly" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
+        # Should send Ghost Recovery message
+        assert any("Initiating Ghost Recovery" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
+        mock_server_manager.force_stop_server.assert_called_with(mock_server)
 
     @pytest.mark.asyncio
     async def test_cmd_send_all(self, handler, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_server, mock_message):
@@ -450,10 +548,10 @@ class TestServerControlHandlerErrorHandling:
         await handler.cmd_send(mock_message, ".send TheIsland Test", ".send theisland test")
         
         # Should send error message
-        assert any("Failed to send message" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
+        assert any("Failed to send to" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
 
     @pytest.mark.asyncio
-    async def test_restart_all_servers(self, handler, mock_player_manager, mock_server_manager, mock_server, mock_message):
+    async def test_restart_all_servers(self, handler, mock_player_manager, mock_telemetry_manager, mock_server_manager, mock_server, mock_message):
         """Test _restart_all_servers method."""
         mock_server_manager.servers = [mock_server]
         mock_server_manager.start_server = Mock()
@@ -464,7 +562,7 @@ class TestServerControlHandlerErrorHandling:
         
         # Should clear player data
         mock_player_manager.clear_server_players.assert_called_once()
-        mock_player_manager.reset_file_positions.assert_called_once()
+        mock_telemetry_manager.trigger_log_file_detection_on_restart.assert_called_once()
         
         # Should start server
         mock_server_manager.start_server.assert_called_with(mock_server)
@@ -536,46 +634,29 @@ class TestServerControlHandlerErrorHandling:
         # Should send unexpected error message
         assert any("Unexpected error" in str(call) for call in mock_discord_manager.send_temp_message.call_args_list)
 
-    @pytest.mark.asyncio
-    async def test_broadcast_all(self, handler, mock_server_manager, mock_rcon_manager, mock_server):
-        """Test _broadcast_all method."""
-        mock_server_manager.servers = [mock_server]
-        
-        await handler._broadcast_all("Test broadcast")
-        
-        # Should send to all servers
-        mock_rcon_manager.execute_for_server.assert_called_with(mock_server, "ServerChat Test broadcast")
 
     @pytest.mark.asyncio
-    async def test_broadcast_all_rcon_error(self, handler, mock_server_manager, mock_rcon_manager, mock_server):
-        """Test _broadcast_all with RCON error."""
-        mock_server_manager.servers = [mock_server]
-        mock_rcon_manager.execute_for_server.side_effect = RCONConnectionError("TestServer", "Connection failed")
-        
-        # Should not raise exception
-        await handler._broadcast_all("Test")
-
-    @pytest.mark.asyncio
-    async def test_delayed_raptorchat_restart(self, handler, mock_player_manager, mock_raptorchat_manager, mock_message):
+    async def test_delayed_raptorchat_restart(self, handler, mock_player_manager, mock_telemetry_manager, mock_raptorchat_manager, mock_message):
         """Test _delayed_raptorchat_restart method."""
-        with patch('patchraptor.raptorchat_utils.RaptorChatUtils.delayed_raptorchat_restart', new_callable=AsyncMock) as mock_restart, \
-             patch('asyncio.sleep', new_callable=AsyncMock):
+        mock_raptorchat_manager.is_running.return_value = False
+        with patch('asyncio.sleep', new_callable=AsyncMock):
             await handler._delayed_raptorchat_restart(120, mock_message.channel)
         
         # Should resume player manager
         mock_player_manager.resume.assert_called_once()
         
-        # Should trigger log detection
-        mock_player_manager.trigger_log_file_detection_on_restart.assert_called_once()
+        # Should trigger log detection on telemetry_manager
+        mock_telemetry_manager.trigger_log_file_detection_on_restart.assert_called_once()
         
-        # Should call RaptorChat restart
-        mock_restart.assert_called_once()
+        # Should call RaptorChat start_with_delay
+        mock_raptorchat_manager.start_with_delay.assert_called_once_with(120)
 
     @pytest.mark.asyncio
     async def test_cmd_servers_offline_server(self, handler, mock_server_manager, mock_discord_manager, mock_server, mock_message):
         """Test .servers command with offline server."""
         mock_server_manager.servers = [mock_server]
         mock_server_manager.get_display_name.return_value = "The Island"
+        mock_server_manager.get_server_process.return_value = None
         
         with patch('psutil.process_iter', return_value=[]), \
              patch('os.path.exists', return_value=True), \
@@ -585,24 +666,31 @@ class TestServerControlHandlerErrorHandling:
              patch('psutil.disk_usage', return_value=MagicMock(total=100*1024*1024*1024, used=50*1024*1024*1024)):
             await handler.cmd_servers(mock_message, ".servers", ".servers")
         
-        # Should send message with OFFLINE status
-        args = mock_discord_manager.send_temp_message.call_args[0]
-        assert "OFFLINE" in args[1]
+        # Should send message with OFFLINE status in embed description
+        _, kwargs = mock_discord_manager.send_temp_message.call_args
+        embed = kwargs.get('embed')
+        assert embed is not None
+        assert "Offline" in embed.description
+        assert "The Island" in embed.description
 
     @pytest.mark.asyncio
     async def test_cmd_servers_disk_error(self, handler, mock_server_manager, mock_discord_manager, mock_server, mock_message):
         """Test .servers command with disk error."""
         mock_server_manager.servers = [mock_server]
         mock_server_manager.get_display_name.return_value = "The Island"
+        mock_server_manager.get_server_process.return_value = None
         
         with patch('psutil.process_iter', return_value=[]), \
              patch('os.path.exists', return_value=True), \
-             patch('os.walk', side_effect=Exception("Disk error")):
+             patch('patchraptor.system_utils.SystemUtils.get_directory_size', side_effect=Exception("Disk error")):
             await handler.cmd_servers(mock_message, ".servers", ".servers")
         
-        # Should send message with Error
-        args = mock_discord_manager.send_temp_message.call_args[0]
-        assert "Error" in args[1]
+        # Should send message with Error in embed description
+        _, kwargs = mock_discord_manager.send_temp_message.call_args
+        embed = kwargs.get('embed')
+        assert embed is not None
+        assert "Error" in embed.description
+        assert "The Island" in embed.description
 
     @pytest.mark.asyncio
     async def test_cmd_servers_psutil_error(self, handler, mock_server_manager, mock_discord_manager, mock_server, mock_message):

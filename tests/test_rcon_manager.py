@@ -24,6 +24,7 @@ class TestRCONCommandValidation:
     def test_safe_commands_allowed(self):
         """Test that safe commands pass validation."""
         safe_commands = [
+            "GetGameLog",
             "SaveWorld",
             "DoExit",
             "ServerChat Hello World",
@@ -94,100 +95,96 @@ class TestExecuteCommand:
         self.rcon = RCONManager(rcon_tool="rcon-cli")
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_success(self, mock_to_thread):
+    async def test_execute_command_success(self):
         """Test successful command execution."""
         mock_result = Mock()
         mock_result.stdout = "Command executed successfully"
         mock_result.stderr = ""
-        mock_to_thread.return_value = mock_result
+        mock_result.returncode = 0
         
-        result = await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
-        
-        assert result == "Command executed successfully"
+        with patch('patchraptor.rcon_manager.subprocess.run', return_value=mock_result):
+            result = await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
+            assert result == "Command executed successfully"
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_doexit_success(self, mock_to_thread):
+    async def test_execute_command_doexit_success(self):
         """Test successful DoExit command execution."""
         mock_result = Mock()
         mock_result.stdout = "Server shutting down"
         mock_result.stderr = ""
-        mock_to_thread.return_value = mock_result
+        mock_result.returncode = 0
         
-        result = await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
-        
-        assert result == "Server shutting down"
+        with patch('patchraptor.rcon_manager.subprocess.run', return_value=mock_result):
+            result = await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
+            assert result == "Server shutting down"
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_doexit_stderr(self, mock_to_thread):
+    async def test_execute_command_doexit_stderr(self):
         """Test DoExit command with stderr."""
         mock_result = Mock()
         mock_result.stdout = ""
         mock_result.stderr = "Connection error"
-        mock_to_thread.return_value = mock_result
+        mock_result.returncode = 1
         
-        with pytest.raises(RCONConnectionError):
-            await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
+        with patch('patchraptor.rcon_manager.subprocess.run', return_value=mock_result):
+            with pytest.raises(RCONConnectionError):
+                await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_doexit_rcon_exception(self, mock_to_thread):
+    async def test_execute_command_doexit_rcon_exception(self):
         """Test DoExit command with RCON exception in output."""
         mock_result = Mock()
         mock_result.stdout = "RCON Exception: Connection failed"
         mock_result.stderr = ""
-        mock_to_thread.return_value = mock_result
+        mock_result.returncode = 0
         
-        with pytest.raises(RCONConnectionError):
-            await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
+        with patch('patchraptor.rcon_manager.subprocess.run', return_value=mock_result):
+            with pytest.raises(RCONConnectionError):
+                await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_doexit_one_or_more_errors(self, mock_to_thread):
+    async def test_execute_command_doexit_one_or_more_errors(self):
         """Test DoExit command with 'One or more errors occurred' in output."""
         mock_result = Mock()
         mock_result.stdout = "One or more errors occurred"
         mock_result.stderr = ""
-        mock_to_thread.return_value = mock_result
+        mock_result.returncode = 0
         
-        with pytest.raises(RCONConnectionError):
-            await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
+        with patch('patchraptor.rcon_manager.subprocess.run', return_value=mock_result):
+            with pytest.raises(RCONConnectionError):
+                await self.rcon.execute_command("127.0.0.1", 27020, "test123", "DoExit")
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_regular_stderr(self, mock_to_thread):
+    async def test_execute_command_regular_stderr(self):
         """Test regular command with stderr."""
         mock_result = Mock()
         mock_result.stdout = "Output"
         mock_result.stderr = "Error message"
-        mock_to_thread.return_value = mock_result
+        mock_result.returncode = 1
         
-        with pytest.raises(RCONConnectionError):
-            await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
+        with patch('patchraptor.rcon_manager.subprocess.run', return_value=mock_result):
+            with pytest.raises(RCONConnectionError):
+                await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_called_process_error(self, mock_to_thread):
+    async def test_execute_command_called_process_error(self):
         """Test handling CalledProcessError."""
         error = subprocess.CalledProcessError(1, "cmd")
         error.stderr = "Process failed"
-        mock_to_thread.side_effect = error
         
-        with pytest.raises(RCONCommandError):
-            await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
+        with patch('patchraptor.rcon_manager.subprocess.run', side_effect=error):
+            with pytest.raises(RCONCommandError):
+                await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_called_process_error_no_stderr(self, mock_to_thread):
+    async def test_execute_command_called_process_error_no_stderr(self):
         """Test handling CalledProcessError without stderr."""
         error = subprocess.CalledProcessError(1, "cmd")
         error.stderr = None
-        mock_to_thread.side_effect = error
         
-        with pytest.raises(RCONCommandError):
-            await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
+        with patch('patchraptor.rcon_manager.subprocess.run', side_effect=error):
+            with pytest.raises(RCONCommandError):
+                await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
     
     @pytest.mark.asyncio
     async def test_execute_command_validation_error(self):
@@ -196,13 +193,11 @@ class TestExecuteCommand:
             await self.rcon.execute_command("127.0.0.1", 27020, "test123", "Invalid; Command")
     
     @pytest.mark.asyncio
-    @patch('asyncio.to_thread', new_callable=AsyncMock)
-    async def test_execute_command_connection_error(self, mock_to_thread):
+    async def test_execute_command_connection_error(self):
         """Test handling connection errors."""
-        mock_to_thread.side_effect = Exception("Connection refused")
-        
-        with pytest.raises(RCONConnectionError):
-            await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
+        with patch('patchraptor.rcon_manager.subprocess.run', side_effect=Exception("Connection refused")):
+            with pytest.raises(RCONConnectionError):
+                await self.rcon.execute_command("127.0.0.1", 27020, "test123", "SaveWorld")
 
 
 class TestExecuteForServer:

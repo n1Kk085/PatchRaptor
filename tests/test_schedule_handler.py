@@ -28,9 +28,9 @@ class TestScheduleHandler:
     @pytest.fixture
     def handler(self, mock_server_manager, mock_discord_manager, mock_schedule_manager):
         return ScheduleHandler(
-            mock_server_manager,
-            mock_discord_manager,
-            mock_schedule_manager
+            server_manager=mock_server_manager,
+            discord_manager=mock_discord_manager,
+            schedule_manager=mock_schedule_manager
         )
 
     @pytest.fixture
@@ -73,6 +73,13 @@ class TestScheduleHandler:
         await handler.cmd_schedule(mock_message, ".schedule add reboot 03:00", ".schedule add reboot 03:00")
         
         mock_schedule_manager.add_event.assert_called_with("reboot", "03:00", [], None, "all")
+
+    @pytest.mark.asyncio
+    async def test_cmd_schedule_add_valid_patch(self, handler, mock_message, mock_schedule_manager):
+        """Test adding patch event"""
+        await handler.cmd_schedule(mock_message, ".schedule add patch 04:00", ".schedule add patch 04:00")
+        
+        mock_schedule_manager.add_event.assert_called_with("patch", "04:00", [], None, "all")
 
     @pytest.mark.asyncio
     async def test_cmd_schedule_add_valid_backup_map(self, handler, mock_message, mock_schedule_manager):
@@ -135,13 +142,13 @@ class TestScheduleHandler:
     async def test_cmd_schedule_list_no_subtype(self, handler, mock_message, mock_schedule_manager):
         """Test listing events with no subtype"""
         mock_schedule_manager.get_events.return_value = [
-            {"type": "update", "time": "02:00"}
+            {"type": "patch", "time": "02:00"}
         ]
         
         await handler.cmd_schedule(mock_message, ".schedule", ".schedule")
         
         args, _ = handler.discord_manager.send_temp_message.call_args
-        assert "Update at 02:00" in args[1]
+        assert "Patch at 02:00" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_schedule_add_insufficient_args(self, handler, mock_message, mock_discord_manager):

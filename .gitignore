@@ -28,6 +28,8 @@ htmlcov/
 # ==========================
 logs/
 *.log
+cluster_live.json
+.webpanel.pid
 
 # ==========================
 # Config Files (ignore actual configs, keep examples)

@@ -117,7 +117,7 @@ def get_logs_directory(servers, logger=None):
     if first_log_file and os.path.exists(os.path.dirname(first_log_file)):
         return os.path.dirname(first_log_file)
         
-    # 3. Fallback: Derive from server_save_path (Smart)
+    # 3. Fallback: Derive from server_save_path
     for server in servers:
         save_path = get_val(server, 'server_save_path')
         if save_path:

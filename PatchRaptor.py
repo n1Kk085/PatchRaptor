@@ -1,3 +1,6 @@
+import os
+import sys
+
 #!/usr/bin/env python3
 # Copyright (c) 2026 n1Kk085/PatchRaptor
 # Licensed under the PATCHRAPTOR LICENSE AGREEMENT.
@@ -20,22 +23,13 @@ import sys
 import os
 import time
 import psutil  # For process management
-
-def resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    if hasattr(sys, '_MEIPASS'):
-        # Running from PyInstaller bundle folder
-        base_path = sys._MEIPASS
-    else:
-        # Running in normal python environment
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+from patchraptor.gui_utils import resource_path, GUI_COLORS, GUI_FONTS
 
 # Styling constants matching config.py
-BUTTON_COLOR = "#5B83C9"
-FONT_NAME = "Consolas"
-FONT_SIZE = 14
-FRAME_COLOR = "#222222"
+BUTTON_COLOR = GUI_COLORS["PRIMARY"]
+FONT_NAME = GUI_FONTS["MAIN"]
+FONT_SIZE = GUI_FONTS["SIZE"]
+FRAME_COLOR = GUI_COLORS["DARK_BG"]
 
 class PatchRaptorGUI:
     def __init__(self, root):
@@ -207,7 +201,7 @@ class PatchRaptorGUI:
                 self.is_running = True
                 self.start_button.configure(state="disabled")
                 self.stop_button.configure(state="normal")
-                self.status_label.configure(text="● Running", text_color="#44ff44")
+                self.status_label.configure(text="● Running", text_color=GUI_COLORS["SUCCESS"])
                 
                 self.output_thread = threading.Thread(target=self.read_output, daemon=True)
                 self.output_thread.start()
@@ -216,7 +210,7 @@ class PatchRaptorGUI:
             except Exception as e:
                 self.is_running = False
                 messagebox.showerror("Error", f"Failed to start bot:\n{str(e)}")
-                self.status_label.configure(text="● Failed to start", text_color="#ff4444")
+                self.status_label.configure(text="● Failed to start", text_color=GUI_COLORS["DANGER"])
     
     def stop_bot(self, force_kill=False):
         """Stop the bot process with proper synchronization
@@ -237,31 +231,6 @@ class PatchRaptorGUI:
                         # Always use psutil for a more robust cross-platform process tree termination
                         # This ensures child processes like cloudflared and RaptorChat are also killed
                         try:
-                            
-                            # WINDOWS SPECIFIC: Use taskkill for absolute robustness
-                            if sys.platform == "win32":
-                                try:
-                                    logger_msg = f"Taskkill on PID {self.process.pid}...\n"
-                                    subprocess.run(
-                                        ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        creationflags=subprocess.CREATE_NO_WINDOW
-                                    )
-                                    
-                                    # Explicitly kill known child processes by name (Cleanup for detached processes)
-                                    # User requested: Instinct, RaptorChat, WebPanel, Tunnel (cloudflared)
-                                    process_names = ["RaptorChat.exe", "WebPanel.exe", "cloudflared.exe"]
-                                    for proc_name in process_names:
-                                        try:
-                                            subprocess.run(
-                                                ["taskkill", "/F", "/IM", proc_name],
-                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                creationflags=subprocess.CREATE_NO_WINDOW
-                                            )
-                                        except Exception:
-                                            pass
-                                except Exception as e:
-                                    print(f"Taskkill failed: {e}")
 
                             parent = psutil.Process(self.process.pid)
                             for child in parent.children(recursive=True):

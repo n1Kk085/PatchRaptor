@@ -30,130 +30,117 @@ from .exceptions import (
     PlayerError,
     PlayerOperationError
 )
-from .raptorchat_utils import RaptorChatUtils
+from .system_utils import SystemUtils
+from .base_handler import BaseHandler
 
 
-class UpdateManagementHandler:
-    """Handles update management commands: update, forceupdate, autoupdate, cancel"""
+class UpdateManagementHandler(BaseHandler):
+    """Handles SteamCMD updates, versioning, and countdowns"""
     
-    def __init__(
-        self,
-        server_manager: ServerManager,
-        rcon_manager: RCONManager,
-        version_manager: VersionManager,
-        discord_manager: DiscordManager,
-        config_manager: ConfigManager,
-        player_manager,
-        raptorchat_manager=None
-    ):
-        self.server_manager = server_manager
-        self.rcon_manager = rcon_manager
-        self.version_manager = version_manager
-        self.discord_manager = discord_manager
-        self.config_manager = config_manager
-        self.player_manager = player_manager
-        self.raptorchat_manager = raptorchat_manager
-
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         # Internal state for long-running tasks
         self.update_lock = asyncio.Lock()
         self.timer_task: asyncio.Task | None = None
         self.update_task: asyncio.Task | None = None
         self.autoupdate_enabled: bool = True
         self.autoupdate_task: asyncio.Task | None = None
-        self.last_check_version: str | None = None
+
+    async def _get_patch_settings(self):
+        """Get patch settings from config with internal defaults for robustness"""
+        settings = self.config_manager.get("patch_settings", {})
+        return {
+            "timer": settings.get("timer", 15),
+            "broadcast": settings.get("broadcast", "Servers will be shutting down for maintenance in {minutes} minutes"),
+            "intervals": settings.get("intervals", [15, 10, 5, 1])
+        }
 
     async def _run_update_countdown(self, channel):
-        """Runs the 15-minute countdown with broadcasts."""
-        broadcast_template = "Servers will be shutting down for maintenance in {minutes} minutes"
-        logger.debug_update(f"Broadcast template configured: {broadcast_template}")
+        """Runs the dynamic countdown with broadcasts based on configuration."""
+        settings = await self._get_patch_settings()
+        timer = settings["timer"]
+        broadcast_template = settings["broadcast"]
+        intervals = settings["intervals"]
+        
+        logger.debug_update(f"Starting patch countdown: {timer}m, Intervals: {intervals}")
         
         # Webhook notification
         webhook_url = self.config_manager.get("discord_webhook", "")
-        webhook_msg = self.config_manager.get("webhook_messages", {}).get("shutdown")
-        logger.debug_update(f"Webhook configuration - URL: {'configured' if webhook_url else 'not configured'}, shutdown message: {'configured' if webhook_msg else 'not configured'}")
-        if webhook_url and webhook_msg:
-            logger.debug_update("Sending shutdown webhook notification")
-            await self.discord_manager.send_webhook_message(webhook_msg)
-        elif webhook_url and not webhook_msg:
-            logger.debug_update("Webhook URL configured but no shutdown message, sending warning")
-            await self.discord_manager.send_temp_message(channel, "⚠️ No webhook message configured for shutdown. Skipping Discord announcement.")
+        # Look for patch-specific webhook, fallback to shutdown
+        webhook_msg = self.config_manager.get("webhook_messages", {}).get("patch")
+        if not webhook_msg:
+            webhook_msg = self.config_manager.get("webhook_messages", {}).get("shutdown")
         
-        logger.info_system("Starting 15-minute shutdown countdown...")
+        if webhook_url:
+            if webhook_msg:
+                logger.debug_update("Sending patch/shutdown webhook notification")
+                # Format with timer if placeholder exists
+                try:
+                    formatted_msg = webhook_msg.format(timer=f"{timer}")
+                except (KeyError, ValueError):
+                    formatted_msg = webhook_msg
+                await self.discord_manager.send_webhook_message(formatted_msg)
+            else:
+                await self.discord_manager.send_temp_message(channel, "⚠️ No webhook message configured for `patch`. Skipping Discord announcement.")
         
-        # Countdown loop - logs every minute, but only broadcasts at 15, 10, 5, and 1 minutes
-        logger.debug_update("Starting countdown loop for shutdown warnings")
-        for minutes_left in range(15, 0, -1):
-            # Log the countdown every minute
+        
+        logger.info_system(f"Starting {timer}-minute patch countdown...")
+        
+        # Countdown loop
+        for minutes_left in range(timer, 0, -1):
             logger.debug_update(f"Countdown: {minutes_left} minutes remaining")
-            logger.info_system(f"Shutdown countdown: {minutes_left} minutes remaining.")
             
-            # Only broadcast at 15, 10, 5, and 1 minute marks
-            if minutes_left in [15, 10, 5, 1]:
+            # Broadcast if minutes_left is in the configured intervals
+            if minutes_left in intervals:
                 logger.debug_update(f"Sending broadcast at {minutes_left} minutes")
-                await self._broadcast_all(broadcast_template.format(minutes=minutes_left))
+                interval_msg = broadcast_template.format(minutes=f"{minutes_left}")
+                if minutes_left == 1:
+                    interval_msg = interval_msg.replace("1 minutes", "1 minute")
+                await self._broadcast_all(interval_msg)
+                await self.discord_manager.send_temp_message(channel, f"⏳ {interval_msg}")
             
-            # Sleep for 1 minute between each iteration
+            # Sleep for 1 minute
             await asyncio.sleep(60)
 
     async def _shutdown_and_update_servers(self, channel):
         """Wrapper for update process to ensure player manager is paused"""
-        # Player Manager will be explicitly resumed after the 2-minute delay
-        # inside _internal_shutdown_and_update_servers (line 259)
         await self._internal_shutdown_and_update_servers(channel)
 
-    async def _internal_shutdown_and_update_servers(self, channel):
-        """Shuts down all servers, runs SteamCMD update, and saves the new version."""
-        # Stop RaptorChat before server shutdown
-        if hasattr(self, 'raptorchat_manager') and self.raptorchat_manager:
-            logger.debug_update("Stopping RaptorChat before server shutdown")
-            logger.info_system("Stopping RaptorChat before server shutdown...")
-            try:
-                if self.raptorchat_manager.is_running():
+    async def _internal_shutdown_and_update_servers(self, channel, skip_countdown=False):
+        """Internal method to perform the actual shutdown and update sequence (Unified Path)"""
+        if channel:
+            await self.discord_manager.send_temp_message(channel, "🖥️ Pausing Telemetry and Chat Relay...")
+        
+        # Use maintenance scope to ensure semaphore is released even on failure
+        # We use handoff=True because SystemUtils.unified_system_recovery will eventually
+        # call end_maintenance via raptorchat_manager.start_with_delay
+        if self.raptorchat_manager:
+            rc_scope = self.raptorchat_manager.maintenance_scope(handoff=True)
+        else:
+            from contextlib import asynccontextmanager
+            @asynccontextmanager
+            async def null_scope(): yield
+            rc_scope = null_scope()
+
+        async with rc_scope:
+            if self.raptorchat_manager and self.raptorchat_manager.is_running():
+                try:
                     self.raptorchat_manager.stop()
                     logger.info_system("RaptorChat stopped successfully")
-                else:
-                    logger.debug_update("RaptorChat is not running, skipping stop")
-            except Exception as e:
-                logger.debug_update(f"Error stopping RaptorChat: {e}")
-                logger.error_system(f"Error stopping RaptorChat: {e}")
-        else:
-            logger.debug_update("RaptorChat manager not available, skipping stop")
-        
-        # Pause Player Manager after RaptorChat is stopped
-        if hasattr(self, 'player_manager') and self.player_manager:
-            self.player_manager.pause()
+                except Exception as e:
+                    logger.error_system(f"Error stopping RaptorChat: {e}")
+                    if channel:
+                        await self.discord_manager.send_temp_message(channel, f"⚠️ Error stopping RaptorChat: {e}. Continuing...")
+            elif self.raptorchat_manager:
+                logger.debug_update("RaptorChat is not running, skipping stop")
+            
+            # Pause Player Manager after RaptorChat is stopped
+            if self.player_manager:
+                self.player_manager.pause()
 
-        # Shutdown all servers
-        logger.debug_update("Sending final shutdown broadcast to all servers")
-        await self._broadcast_all("Servers are shutting down now.")
-        logger.info_system("Sending final shutdown command to all servers.")
-        await self.discord_manager.send_temp_message(
-            channel, "🦕 Shutting down running servers..."
-        )
-        
-        # Send DoExit to all servers
-        logger.info_system("Sending RCON command: DoExit")
-        shutdown_tasks = []
-        for server in self.server_manager.servers:
-            task = self.rcon_manager.execute_for_server(server, "DoExit")
-            shutdown_tasks.append((server, task))
-        
-        for server, task in shutdown_tasks:
-            try:
-                await task
-                logger.info_system(f"Successfully sent to {server.name} ({server.rcon_ip}:{server.rcon_port})")
-            except (RCONConnectionError, RCONCommandError) as e:
-                logger.debug_update(f"Failed to send shutdown to {server.name}: {e.reason}")
-                logger.error_system(f"Failed to send shutdown to: {server.name} — {e.reason}")
-                await self.discord_manager.send_temp_message(channel, f"❌ Failed to send shutdown to: {server.name}")
-        
-        logger.info_system("Waiting for all servers to shut down...")
-        
-        # Wait for each server to shut down with active monitoring
-        for server in self.server_manager.servers:
-            shutdown_success = await self.server_manager.wait_for_server_shutdown(server, timeout=300)
-            if not shutdown_success:
-                logger.warning_system(f"Timeout waiting for {server.name} to shut down completely")
+            # Shutdown all servers using the shared helper
+            logger.debug_update("Starting standardized shutdown of all servers")
+            await self._shutdown_all_servers(channel)
         
         # Run SteamCMD update
         logger.debug_update("Starting SteamCMD update process")
@@ -168,33 +155,57 @@ class UpdateManagementHandler:
         server_dir = self.config_manager.get("server_dir")
         app_id = self.config_manager.get("app_id")
         
-        logger.debug_update(f"Using direct SteamCMD execution - path: {steamcmd_path}, dir: {server_dir}, app_id: {app_id}")
-        logger.info_system("Executing SteamCMD update directly...")
         
-        # Build and execute SteamCMD command directly
+        # Verify SteamCMD exists
+        full_steamcmd_path = os.path.abspath(str(steamcmd_path))
+        if not os.path.exists(full_steamcmd_path):
+            logger.error_system(f"Update Aborted: SteamCMD not found at {full_steamcmd_path}")
+            await self.discord_manager.send_temp_message(channel, f"❌ Update Error: SteamCMD not found at `{full_steamcmd_path}`! Please check your `config.json`.")
+            raise UpdateError(f"SteamCMD executable not found: {full_steamcmd_path}")
+
+        # Verify server_dir exists before proceeding
+        full_server_path = os.path.abspath(str(server_dir))
+        if not os.path.exists(full_server_path):
+            logger.error_system(f"Update Aborted: Game directory not found at {full_server_path}")
+            await self.discord_manager.send_temp_message(channel, f"❌ Update Error: Game directory not found! Check your configuration.")
+            raise UpdateError(f"Install directory does not exist: {full_server_path}")
+
+        # Build and execute SteamCMD command.
         cmd_args = [
-            steamcmd_path,
-            "+force_install_dir", server_dir,
+            os.path.abspath(str(steamcmd_path)),
             "+login", "anonymous",
-            "+app_update", app_id,
+            "+app_update", str(app_id),
             "validate",
             "+quit"
         ]
-        
+
         logger.debug_update(f"SteamCMD command: {cmd_args}")
-        result = await execute_steamcmd_simple(cmd_args)
-        
+
+        try:
+            # Execute SteamCMD.
+            result = await execute_steamcmd_simple(cmd_args)
+        except OSError as e:
+            logger.error_system(f"Windows rejected the SteamCMD launch (Errno {e.errno}): {e.strerror}")
+            await self.discord_manager.send_temp_message(channel, f"❌ System Error: {e.strerror}. Check your config paths.")
+            raise UpdateError(f"OS rejected the command: {e}")
+
         logger.debug_update(f"SteamCMD execution completed, return code: {result.returncode}")
-                 
-        logger.debug_update(f"SteamCMD execution completed, return code: {result.returncode}")
+
         if result.returncode != 0:
-            logger.debug_update("SteamCMD update failed, sending error notification to channel")
-            logger.error_system("SteamCMD update failed")
-            await self.discord_manager.send_temp_message(channel, "❌ SteamCMD update failed. Manual intervention required.")
-            raise UpdateError("SteamCMD update failed.")
+            logger.debug_update(f"SteamCMD update failed (Code {result.returncode})")
+            logger.error_system(f"SteamCMD update failed: {result.stderr or 'No error output'}")
+            
+            # Detailed error message for Discord
+            error_details = (result.stderr or result.stdout or "No diagnostic output available").strip()
+            if len(error_details) > 300:
+                error_details = error_details[-300:] + "..." # Show last 300 chars of tail
+            
+            await self.discord_manager.send_temp_message(
+                channel, 
+                f"❌ SteamCMD Error (Code {result.returncode}):\n{error_details}"
+            )
+            raise UpdateError(f"SteamCMD update failed with code {result.returncode}")
         
-        logger.debug_update("SteamCMD update completed successfully")
-        logger.info_system("SteamCMD update completed successfully")
         
         # Save new version
         logger.debug_update("Starting version information update process")
@@ -215,479 +226,271 @@ class UpdateManagementHandler:
         # Restart servers
         logger.debug_update("Starting server restart sequence")
         logger.info_system("Restarting servers...")
-        await self.discord_manager.send_temp_message(channel, "🦖 Starting servers after update...")
+        await self.discord_manager.send_temp_message(channel, f"🦖 Starting **{len(self.server_manager.servers)}** servers...")
         
-        # Use shared restart method for consistency with forceupdate (clears cache, staggers 30s)
         # Create a mock message object because _restart_all_servers expects one
         class UpdateMessage:
             def __init__(self, ch):
                 self.channel = ch
+                self.content = ".patch"
+                self.author = type('MockAuthor', (), {'id': 'AutoUpdateSystem', 'name': 'PatchRaptor'})()
         
         await self._restart_all_servers(UpdateMessage(channel))
         
         # Wait for servers to come online and confirm success
-        if hasattr(self, 'server_manager'):
-            await self.discord_manager.send_temp_message(channel, "⏳ Waiting for servers to come back online...")
-            all_online = await self._wait_for_servers_online(self.server_manager.servers)
-            if all_online:
-                await self.discord_manager.send_temp_message(channel, "✅ All servers are back online")
+        servers_online = False
+        if self.server_manager:
+            await self.discord_manager.send_temp_message(channel, f"⏳ Waiting for **{len(self.server_manager.servers)}** servers to come back online...")
+            logger.debug_update("Waiting for servers to come online after global update...")
+            servers_online = await self.server_manager.wait_for_servers_online(self.server_manager.servers)
+            
+            # Coordinated System Recovery
+            if servers_online:
+                await self.discord_manager.send_temp_message(channel, "🦕 All servers are back online")
+                logger.info_system("All servers are back online")
                 
-                # Webhook notification for completion (using reboot message as requested)
-                webhook_url = self.config_manager.get("discord_webhook", "")
-                webhook_msg = self.config_manager.get("webhook_messages", {}).get("reboot")
-                if webhook_url and webhook_msg:
-                    logger.debug_update("Sending completion webhook notification")
-                    await self.discord_manager.send_webhook_message(webhook_msg)
+                # Perform unified recovery (Wait 120s before starting chat)
+                # This handles maintenance, player_manager resume, and raptorchat restart
+                await SystemUtils.unified_system_recovery(
+                    delay=5,
+                    channel=channel,
+                    raptorchat_manager=self.raptorchat_manager,
+                    player_manager=self.player_manager,
+                    discord_manager=self.discord_manager,
+                    telemetry_manager=self.telemetry_manager,
+                    msg_header="🖥️ Reconnecting Telemetry and Chat Relay after server update..."
+                )
+
             else:
                 await self.discord_manager.send_temp_message(channel, "⚠️ Not all servers came back online automatically. Please check status.")
+        else:
+            logger.warning_system("No server manager available for online check")
 
-        # Restart RaptorChat
-        # The start_server loop above might trigger RaptorChat if configured, 
-        # but usually RaptorChat is a separate process.
-        # We should check if we need to start it.
-        if hasattr(self, 'raptorchat_manager') and self.raptorchat_manager:
-            logger.info_system("Restarting RaptorChat...")
-            # Use delayed start to let servers initialize (2 minute delay)
-            
-            # Wait 2 minutes (blocking)
-            await asyncio.sleep(120)
-            
-            # Resume PlayerManager (explicitly here to control log order)
-            if hasattr(self, 'player_manager') and self.player_manager:
-                self.player_manager.resume()
-                
-            # Trigger PlayerManager Log Detection IMMEDIATELY
-            if hasattr(self, 'player_manager') and self.player_manager:
-                 await self.player_manager.trigger_log_file_detection_on_restart()
-                 
-            await RaptorChatUtils.delayed_raptorchat_restart(
-                self.raptorchat_manager, 
-                0, 
-                channel, 
-                self.discord_manager
-            )
-
-    async def cmd_update(self, message, content: str, content_lower: str):
-        """Handle .update command - full maintenance update"""
-        from .log_manager import logger
-        logger.debug_update(".update command received")
-        logger.info_command(".update received")
+    async def cmd_patch(self, message, content: str, content_lower: str):
+        """Handle .patch command"""
+        author_id = getattr(getattr(message, "author", None), "id", None)
+        if author_id == "ScheduleSystem":
+            logger.info_command("Scheduled .patch initialising...")
+        else:
+            logger.info_command(".patch received")
+        parts = content.split()
         
-        # Check if update is already in progress (in-memory lock)
-        if self.update_lock.locked():
-            logger.debug_update("Update already in progress, sending notification")
-            await self.discord_manager.send_temp_message(message.channel, "⚠️ Update already in progress. Please wait for it to complete.")
+        # If no subcommands, start the patch process directly
+        if len(parts) == 1:
+            await self._internal_cmd_patch_start(message)
             return
 
-        # Check for a stale update file (disk lock)
+        subcommand = parts[1].lower()
+        
+        if subcommand == "timer":
+            await self._cmd_patch_set_timer(message, parts)
+        elif subcommand == "broadcast":
+            await self._cmd_patch_set_broadcast(message, parts, content)
+        elif subcommand == "intervals":
+            await self._cmd_patch_set_intervals(message, parts)
+        elif subcommand == "webhook":
+            await self._cmd_patch_set_webhook(message, parts, content)
+        elif subcommand == "status":
+            await self._cmd_patch_settings(message)
+        else:
+            await self.discord_manager.send_temp_message(message.channel, f"⚠️ Unknown patch subcommand: `{subcommand}`")
+
+    async def _check_stale_lock_file(self, message):
+        """Check for and remove stale update lock file"""
         if os.path.exists("update_in_progress.json"):
-            # Check if it's stale (older than 2 hours)
             try:
                 creation_time = os.path.getctime("update_in_progress.json")
                 if (time.time() - creation_time) > 7200: # 2 hours
                     logger.warning_system("Found stale update_in_progress.json (older than 2h), removing it.")
                     os.remove("update_in_progress.json")
+                    return True
                 else:
-                    await self.discord_manager.send_temp_message(message.channel, "⚠️ An `update_in_progress.json` file was found. This may indicate a previously failed update. Please resolve the issue and delete the file manually before starting a new update.")
-                    return
+                    await self.discord_manager.send_temp_message(
+                        message.channel, 
+                        "⚠️ An update_in_progress.json file was found. This may indicate a previously failed update. Please resolve the issue and delete the file manually before starting a new update."
+                    )
+                    return False
             except OSError:
-                pass # File might have been deleted in the meantime
-        
-        logger.debug_update("Acquiring update lock and starting update process")
+                return True # File deleted during check.
+        return True
+
+    async def _internal_cmd_patch_start(self, message):
+        """Standard maintenance patch with countdown"""
+        if self.update_lock.locked():
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Patch already in progress.")
+            return
+
+        if not await self._check_stale_lock_file(message):
+            return
+
         async with self.update_lock:
             self.update_task = asyncio.current_task()
             try:
-                # Create state file
                 with open("update_in_progress.json", "w") as f:
                     json.dump({"start_time": datetime.datetime.now().isoformat()}, f)
 
-                logger.debug_update("Update lock acquired, starting full maintenance update process")
-                logger.info_system("Starting full maintenance update process...")
+                settings = await self._get_patch_settings()
+                timer = settings["timer"]
                 
-                await self.discord_manager.send_temp_message(message.channel, "🦕 Update process started. Servers will shut down for maintenance in 15 minutes...")
-                
-                # Run the update sequence
+                await self.discord_manager.send_temp_message(message.channel, "🦖 Patch sequence initiated. Maintenance countdown started.")
                 await self._run_update_countdown(message.channel)
-                await self._shutdown_and_update_servers(message.channel)
+                await self._internal_shutdown_and_update_servers(message.channel)
                 
-                logger.debug_update("Full maintenance update process completed successfully")
-                logger.info_system("Full maintenance update process completed")
-                
+                # Completion Webhook for standard patches
+                webhook_url = self.config_manager.get("discord_webhook", "")
+                webhook_msg = self.config_manager.get("webhook_messages", {}).get("reboot")
+                if webhook_url and webhook_msg:
+                    logger.debug_update("Sending completion webhook notification")
+                    await self.discord_manager.send_webhook_message(webhook_msg)
             except asyncio.CancelledError:
-                logger.info_system("Update process cancelled by user")
-                # No separate message here, handled by cmd_cancel
-                # The finally block will run automatically to clean up the lock file.
-                
+                logger.info_system("Patch process cancelled")
             except Exception as e:
-                error_trace = traceback.format_exc()
-                logger.error_system(f"Critical error during update process: {e}\n{error_trace}")
-                
-                # Notify Discord about the failure
-                msg = f"❌ **Update Failed:** {str(e)}"
-                if len(msg) > 1900:
-                    msg = msg[:1900] + "..."
-                await self.discord_manager.send_temp_message(message.channel, msg)
-                
-                # Attempt to send traceback as a file if it's long
-                try:
-                    with tempfile.NamedTemporaryFile(mode='w+', suffix='.txt', delete=False) as tf:
-                        tf.write(error_trace)
-                        temp_path = tf.name
-                    await message.channel.send("Error Details:", file=discord.File(temp_path, filename="update_error.log"))
-                    # We can't easily unlink here if send is async background, but temp files in OS temp usually get cleaned.
-                    # Or we could schedule cleanup. For now let's leave it simple or try to clean immediately after await.
-                    os.unlink(temp_path)
-                except:
-                    pass
+                logger.error_system(f"Critical error during patch: {e}")
+                await self.discord_manager.send_temp_message(message.channel, f"❌ Patch Failed: {str(e)}")
             finally:
-                # Always clean up the lock file when the operation finishes (success or failure)
                 if os.path.exists("update_in_progress.json"):
-                    try:
-                        os.remove("update_in_progress.json")
-                        logger.debug_update("Cleaned up update_in_progress.json lock file")
-                    except Exception as ex:
-                        logger.error_system(f"Failed to remove update_in_progress.json: {ex}")
+                    os.remove("update_in_progress.json")
 
-    async def cmd_forceupdate(self, message, content: str, content_lower: str):
-        """Handle .forceupdate command - wrapper for pause/resume"""
-        # Player Manager will be paused after RaptorChat is stopped
-        # inside _internal_cmd_forceupdate
-        await self._internal_cmd_forceupdate(message, content, content_lower)
-
-    async def _internal_cmd_forceupdate(self, message, content: str, content_lower: str):
-        """Handle .forceupdate command - force update without countdown"""
-        self.update_task = asyncio.current_task()
-        from .log_manager import logger
-        logger.debug_update(".forceupdate command received")
-        logger.info_command(".forceupdate received")
-        parts = content.split()
-        steamcmd_path = self.config_manager.get("steamcmd_path")
-        app_id = self.config_manager.get("app_id")
+    async def _cmd_patch_settings(self, message):
+        """Display current patch configuration"""
+        settings = await self._get_patch_settings()
+        webhook_msgs = self.config_manager.get("webhook_messages", {})
         
-        logger.debug_update(f"Command parts: {parts}, steamcmd_path: {steamcmd_path}, app_id: {app_id}")
+        valid_intervals = [i for i in settings["intervals"] if i <= settings["timer"]]
+        interval_str = ", ".join(map(str, sorted(valid_intervals, reverse=True)))
         
-        if len(parts) == 1:
-            logger.debug_update("Starting force update for all servers")
-            # Update all servers
-            logger.info_system("Starting force update for all servers...")
-            server_dir = self.config_manager.get("server_dir")
-            
-            logger.debug_update(f"Server directory: {server_dir}")
-            
-            # Stop RaptorChat if it's running
-            if hasattr(self, 'raptorchat_manager') and self.raptorchat_manager and self.raptorchat_manager.is_running():
-                logger.debug_update("Stopping RaptorChat before force update")
-                logger.info_system("Stopping RaptorChat before force update...")
-                try:
-                    self.raptorchat_manager.stop()
-                    await asyncio.sleep(2)  # Give it a moment to stop
-                    logger.debug_update("RaptorChat stopped successfully")
-                except Exception as e:
-                    logger.debug_update(f"Failed to stop RaptorChat: {e}")
-                    logger.warning_system(f"Failed to stop RaptorChat: {e}")
-            else:
-                logger.debug_update("RaptorChat is not running or not available, skipping stop")
-            
-            # Pause Player Manager after RaptorChat is stopped
-            if hasattr(self, 'player_manager') and self.player_manager:
-                self.player_manager.pause()
-            
-            # Check if any servers are running
-            logger.debug_update("Checking if any servers are currently running")
-            running_servers = any(
-                self.server_manager.is_specific_server_running(srv) 
-                for srv in self.server_manager.servers
-            )
-            logger.debug_update(f"Running servers detected: {running_servers}")
-            
-            if running_servers:
-                logger.debug_update("Servers are running, shutting them down before force update")
-                await self.discord_manager.send_temp_message(
-                    message.channel, "🦕 Shutting down running servers..."
-                )
-                logger.debug_update("Calling _shutdown_all_servers")
-                await self._shutdown_all_servers()
-            else:
-                logger.debug_update("No servers running, proceeding directly with force update")
-                await self.discord_manager.send_temp_message(
-                    message.channel, "🦕 No ARK servers currently running. Starting force update..."
-                )
-            
-            # Step 1: Build command as list to prevent command injection
-            logger.debug_update("Building SteamCMD command for all servers")
-            logger.info_system("Building SteamCMD command for all servers...")
-            cmd_args = [
-                steamcmd_path,
-                "+force_install_dir", server_dir,
-                "+login", "anonymous",
-                "+app_update", app_id,
-                "validate",
-                "+quit"
-            ]
-            logger.debug_update(f"SteamCMD command for all servers: {cmd_args}")
-            
-            # Step 2: Execute SteamCMD update
-            logger.debug_update("Executing SteamCMD update for all servers")
-            logger.info_system("Executing SteamCMD update for all servers...")
-            await self.discord_manager.send_temp_message(message.channel, "⬇️ Downloading server updates...")
-            
-            # Execute SteamCMD (SteamCMD buffers output internally)
-            res = await execute_steamcmd_simple(cmd_args)
-            
-            logger.debug_update(f"SteamCMD execution completed, return code: {res.returncode}")
-            if res.returncode != 0:
-                logger.debug_update("SteamCMD force update failed for all servers")
-                logger.error_system("SteamCMD force update failed for all servers")
-                await self.discord_manager.send_temp_message(message.channel, "❌ SteamCMD update failed. Manual intervention required.")
-                return
-            
-            logger.debug_update("SteamCMD force update completed successfully for all servers")
-            logger.info_system("SteamCMD force update completed successfully for all servers")
-            
-            # Save new version
-            logger.debug_update("Saving new version after force update")
-            latest_version = await self.version_manager.get_latest_build_id()
-            if latest_version:
-                logger.debug_update(f"Latest version found: {latest_version}, saving to version file")
-                self.version_manager.save_version(latest_version)
-            else:
-                logger.debug_update("No latest version found, skipping version save")
-            
-            # Step 3: Restart all servers
-            logger.debug_update("Starting restart of all servers after force update")
-            logger.info_system("Restarting all servers after force update...")
-            await self.discord_manager.send_temp_message(message.channel, "🦖 Starting servers after update...")
-            logger.debug_update("Calling _restart_all_servers")
-            await self._restart_all_servers(message)
-            
-            # Step 4: Wait for servers to come back online
-            running_servers = [s for s in self.server_manager.servers 
-                             if self.server_manager.is_specific_server_running(s)]
-            
-            servers_online = False
-            if running_servers:
-                await self.discord_manager.send_temp_message(message.channel, "⏳ Waiting for servers to come back online...")
-                
-                # Wait for servers to come online (using the same timeout as in cmd_reboot)
-                servers_online = await self._wait_for_servers_online(running_servers)
-                
-                if not servers_online:
-                     await self.discord_manager.send_temp_message(
-                        message.channel,
-                        "⚠️ Not all servers came back online. RaptorChat will not be restarted automatically."
-                    )
-            else:
-                await self.discord_manager.send_temp_message(message.channel, "✅ Force update complete. No servers were running to restart.")
-            
-            logger.debug_update("Force update process completed for all servers")
-            logger.info_system("Force update process completed for all servers")
-            
-            # Handle delay and restarts AFTER logging completion
-            if servers_online:
-                # Get the current time as the last server online time
-                last_online_time = asyncio.get_event_loop().time()
-                # Calculate remaining delay (2 minutes from now)
-                remaining_delay = max(0, 120 - (asyncio.get_event_loop().time() - last_online_time))
-                
-                if remaining_delay > 0:
-                    minutes = round(remaining_delay / 60)
-                    await self.discord_manager.send_temp_message(
-                        message.channel, 
-                        f"✅ All servers are back online"
-                    )
-                    
-                    # Wait for delay FIRST
-                    await asyncio.sleep(remaining_delay)
-                    
-                    # Resume PlayerManager (explicitly here to control log order)
-                    if hasattr(self, 'player_manager') and self.player_manager:
-                        self.player_manager.resume()
-                    
-                    # Trigger PlayerManager Log Detection IMMEDIATELY
-                    if hasattr(self, 'player_manager') and self.player_manager:
-                        await self.player_manager.trigger_log_file_detection_on_restart()
-                        
-                    # Start RaptorChat after the remaining delay
-                    asyncio.create_task(
-                        RaptorChatUtils.delayed_raptorchat_restart(
-                            self.raptorchat_manager if hasattr(self, 'raptorchat_manager') else None,
-                            0, # Delay handled above
-                            message.channel,
-                            self.discord_manager if hasattr(self, 'discord_manager') else None
-                        )
-                    )
-                else:
-                    # If we're already past the 2-minute mark, start immediately
-                    
-                     # Resume PlayerManager (explicitly here to control log order)
-                    if hasattr(self, 'player_manager') and self.player_manager:
-                        self.player_manager.resume()
+        embed = discord.Embed(title="🦖 Patch Settings", color=0x3498db)
+        embed.add_field(name="⏱️ Countdown Timer", value=f"{settings['timer']} minutes", inline=True)
+        embed.add_field(name="📡 Broadcast Schedule", value=f"At {interval_str} minutes", inline=True)
+        embed.add_field(name="📡 Broadcast Template", value=f"{settings['broadcast']}", inline=False)
+        
+        shutdown_msg = webhook_msgs.get("shutdown", "🔲 OFF")
+        reboot_msg = webhook_msgs.get("reboot", "🔲 OFF")
+        
+        embed.add_field(name="📢 Shutdown Webhook", value=f"{shutdown_msg}", inline=False)
+        embed.add_field(name="📢 Reboot Webhook", value=f"{reboot_msg}", inline=False)
+        await self.discord_manager.send_temp_message(message.channel, embed=embed)
 
-                    # Trigger PlayerManager Log Detection IMMEDIATELY
-                    if hasattr(self, 'player_manager') and self.player_manager:
-                        await self.player_manager.trigger_log_file_detection_on_restart()
-
-                    asyncio.create_task(
-                        RaptorChatUtils.delayed_raptorchat_restart(
-                            self.raptorchat_manager if hasattr(self, 'raptorchat_manager') else None,
-                            0,
-                            message.channel,
-                            self.discord_manager if hasattr(self, 'discord_manager') else None
-                        )
-                    )
-
+    async def _cmd_patch_set_timer(self, message, parts):
+        """Set the patch countdown timer"""
+        if len(parts) < 3:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Usage: `.patch timer <minutes>`")
             return
-        
-        # Map-specific update
-        map_name = parts[1]
-        logger.debug_update(f"Starting force update for specific server: {map_name}")
-        logger.info_system(f"Starting force update for server: {map_name}")
         try:
-            logger.debug_update(f"Looking up server configuration for: {map_name}")
-            server = self.server_manager.find_server(map_name)
-            logger.debug_update(f"Server found: {server.name}")
-        except ServerNotFoundError:
-            logger.debug_update(f"Server not found for force update: {map_name}")
-            logger.warning_system(f"Server not found for force update: {map_name}")
-            await self.discord_manager.send_temp_message(message.channel, f"⚠️ No server found with name or map '{map_name}'.")
+            timer = int(parts[2])
+            if timer < 1: raise ValueError()
+            settings = self.config_manager.get("patch_settings", {})
+            settings["timer"] = timer
+            self.config_manager.config["patch_settings"] = settings
+            self.config_manager.save()
+            await self.discord_manager.send_temp_message(message.channel, f"☑️ Patch timer set to {timer} minutes.")
+        except ValueError:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Please provide a valid number of minutes.")
+
+    async def _cmd_patch_set_broadcast(self, message, parts, content):
+        """Set the RCON broadcast template"""
+        if len(parts) < 3:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Usage: `.patch broadcast <template>`\nUse {minutes} as a placeholder.")
             return
-        
-        display_name = self.server_manager.get_display_name(server)
-        logger.debug_update(f"Server display name: {display_name}")
-        await self.discord_manager.send_temp_message(
-            message.channel, f"🦕 Force update: Shutting down {display_name} server..."
-        )
-        
-        # Shutdown if running
-        logger.debug_update(f"Checking if server {server.name} is currently running")
-        if self.server_manager.is_specific_server_running(server):
-            logger.debug_update(f"Server {server.name} is running, shutting it down")
+        template = " ".join(parts[2:])
+        settings = self.config_manager.get("patch_settings", {})
+        settings["broadcast"] = template
+        self.config_manager.config["patch_settings"] = settings
+        self.config_manager.save()
+        await self.discord_manager.send_temp_message(message.channel, f"☑️ Patch broadcast template updated.")
+
+    async def _cmd_patch_set_intervals(self, message, parts):
+        """Set the broadcast intervals"""
+        if len(parts) < 3:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Usage: `.patch intervals 15,10,5,1`")
+            return
+        try:
+            interval_str = parts[2].replace(" ", "")
+            intervals = [int(i) for i in interval_str.split(",")]
+            settings = self.config_manager.get("patch_settings", {})
+            settings["intervals"] = intervals
+            self.config_manager.config["patch_settings"] = settings
+            self.config_manager.save()
+            await self.discord_manager.send_temp_message(message.channel, f"☑️ Broadcast intervals updated.")
+        except ValueError:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Please provide a comma-separated list of numbers.")
+
+    async def _cmd_patch_set_webhook(self, message, parts, content):
+        """Set webhook messages under .patch suite"""
+        if len(parts) < 4:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Usage: `.patch webhook shutdown|reboot <message>`")
+            return
+        msg_type = parts[2].lower()
+        if msg_type not in ["shutdown", "reboot"]:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Type must be shutdown or reboot.")
+            return
+        webhook_msg = " ".join(parts[3:])
+        webhook_messages = self.config_manager.get("webhook_messages", {})
+        webhook_messages[msg_type] = webhook_msg
+        self.config_manager.config["webhook_messages"] = webhook_messages
+        self.config_manager.save()
+        await self.discord_manager.send_temp_message(message.channel, f"☑️ {msg_type.capitalize()} webhook message updated.")
+
+    async def cmd_forcepatch(self, message, content: str, content_lower: str):
+        """Handle force update logic (.forcepatch)"""
+        if self.update_lock.locked():
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ Patch already in progress.")
+            return
+        async with self.update_lock:
+            self.update_task = asyncio.current_task()
             try:
-                logger.info_system("Sending RCON command: DoExit")
-                await self.rcon_manager.execute_for_server(server, "DoExit")
-                logger.info_system(f"Successfully sent to {server.name} ({server.rcon_ip}:{server.rcon_port})")
-                # Wait for shutdown
-                logger.debug_update(f"Waiting for server {server.name} to shut down (180 seconds timeout)")
-                await self.server_manager.wait_for_server_shutdown(server, 180)
-                logger.debug_update(f"Server {server.name} shut down successfully")
-            except (RCONConnectionError, RCONCommandError) as e:
-                logger.debug_update(f"Failed to shut down server {server.name}: {e.reason}")
-                await self.discord_manager.send_temp_message(
-                    message.channel, f"❌ Failed to shut down {display_name} server."
-                )
-                return
-        else:
-            logger.debug_update(f"Server {server.name} is not running, proceeding with update")
-        
-        # Run SteamCMD update
-        logger.debug_update(f"Running SteamCMD update for server {map_name}")
-        logger.log(f"Running SteamCMD update for {map_name}...")
-        await self.discord_manager.send_temp_message(message.channel, "⬇️ Downloading server update...")
-        
-        # Step 1: Build command as list to prevent command injection
-        logger.debug_update(f"Building SteamCMD command for server {server.name}")
-        logger.info_system(f"Building SteamCMD command for {server.name}...")
-        cmd_args = [
-            steamcmd_path,
-            "+force_install_dir", server.install_dir,
-            "+login", "anonymous",
-            "+app_update", app_id,
-            "validate",
-            "+quit"
-        ]
-        logger.debug_update(f"SteamCMD command for {server.name}: {cmd_args}")
-        
-        # Step 2: Execute SteamCMD update
-        logger.debug_update(f"Executing SteamCMD update for server {server.name}")
-        logger.info_system(f"Executing SteamCMD update for {server.name}...")
-        
-        # Execute SteamCMD (SteamCMD buffers output internally)
-        res = await execute_steamcmd_simple(cmd_args)
-        
-        logger.debug_update(f"SteamCMD execution completed for {server.name}, return code: {res.returncode}")
-        if res.returncode != 0:
-            logger.debug_update(f"SteamCMD force update failed for server {server.name}")
-            logger.error_system(f"SteamCMD force update failed for {server.name}")
-            await self.discord_manager.send_temp_message(
-                message.channel, "❌ SteamCMD update failed. Manual intervention required."
-            )
-            return
-        
-        logger.debug_update(f"SteamCMD force update completed successfully for server {server.name}")
-        logger.info_system(f"SteamCMD force update completed successfully for {server.name}")
-        
-        # Save new version
-        logger.debug_update(f"Saving new version after force update for server {server.name}")
-        latest_version = await self.version_manager.get_latest_build_id()
-        if latest_version:
-            logger.debug_update(f"Latest version found: {latest_version}, saving to version file")
-            self.version_manager.save_version(latest_version)
-        else:
-            logger.debug_update("No latest version found, skipping version save")
-        
-        # Restart server
-        logger.debug_update(f"Starting server {map_name} after force update")
-        try:
-            # Clear player data for this specific server
-            if hasattr(self, 'player_manager'):
-                logger.debug_update(f"Clearing player data for server {server.name}")
-                await self.player_manager.clear_server_players(server.name)
-                await self.player_manager.reset_file_positions(server.name)
-            
-            logger.debug_update(f"Starting server {server.name}")
-            self.server_manager.start_server(server)
-            logger.debug_update(f"Server {server.name} started successfully")
-            await self.discord_manager.send_temp_message(
-                message.channel, f"🦖 {display_name} is back online..."
-            )
-        except Exception as e:
-            logger.debug_update(f"Failed to start server {server.name} after update: {e}")
-            logger.error_system(f"Failed to start {server.name} after update: {e}")
-            await self.discord_manager.send_temp_message(
-                message.channel, f"❌ Failed to start {display_name}: {e}"
-            )
-        
-        logger.debug_update(f"Force update process completed for server {server.name}")
-        logger.info_system(f"Force update process completed for {server.name}")
+                with open("update_in_progress.json", "w") as f:
+                    json.dump({"start_time": datetime.datetime.now().isoformat(), "force": True}, f)
+                logger.info_system("Starting immediate force patch process...")
+                await self.discord_manager.send_temp_message(message.channel, "🦖 Force update sequence initiated...")
+                await self._internal_shutdown_and_update_servers(message.channel, skip_countdown=True)
+            except asyncio.CancelledError:
+                logger.info_system("Force patch cancelled")
+            except Exception as e:
+                logger.error_system(f"Critical error during force patch: {e}")
+                await self.discord_manager.send_temp_message(message.channel, f"❌ Force Patch Failed: {str(e)}")
+            finally:
+                if os.path.exists("update_in_progress.json"):
+                    os.remove("update_in_progress.json")
 
-    async def cmd_autoupdate(self, message, content: str, content_lower: str):
-        """Handle .autoupdate command - toggle auto-update"""
+    async def cmd_autopatch(self, message, content: str, content_lower: str):
+        """Handle .autopatch command - toggle auto-patch"""
         from .log_manager import logger
-        logger.debug_update(".autoupdate command received")
-        logger.info_command(".autoupdate received")
+        logger.debug_update(".autopatch command received")
+        logger.info_command(".autopatch received")
         parts = content_lower.split()
         logger.debug_update(f"Command parts: {parts}")
         if len(parts) == 1:
-            logger.debug_update("Checking autoupdate status")
-            status = "ON ✅" if self.autoupdate_enabled else "OFF ❌"
+            logger.debug_update("Checking autopatch status")
+            status = "☑️ ON" if self.autoupdate_enabled else "🛑 OFF"
             task_status = "Running" if (self.autoupdate_task and not self.autoupdate_task.done()) else "Stopped"
-            logger.debug_update(f"Autoupdate status: {status}, task status: {task_status}")
+            logger.debug_update(f"Autopatch status: {status}, task status: {task_status}")
             await self.discord_manager.send_temp_message(
                 message.channel, 
-                f"Autoupdate status: {status}\nBackground task: {task_status}"
+                f"Autopatch status: {status}"
             )
             return
         
         if parts[1] == "on":
-            logger.debug_update("Enabling autoupdate")
+            logger.debug_update("Enabling autopatch")
             if not self.autoupdate_enabled:
                 self.autoupdate_enabled = True
-                logger.info_system("Autoupdate enabled, starting background checker...")
+                logger.info_system("Autopatch enabled, starting background checker...")
                 await self.start_autoupdate_checker(message.channel)
-                await self.discord_manager.send_temp_message(message.channel, "Autoupdate is now **ON ✅**\nBackground checker started.")
+                await self.discord_manager.send_temp_message(message.channel, "☑️ Autopatch is now ON.")
             else:
-                logger.debug_update("Autoupdate already enabled")
-                await self.discord_manager.send_temp_message(message.channel, "Autoupdate is already **ON ✅**")
+                logger.debug_update("Autopatch already enabled")
+                await self.discord_manager.send_temp_message(message.channel, "☑️ Autopatch is already ON")
         elif parts[1] == "off":
             logger.debug_update("Disabling autoupdate")
             if self.autoupdate_enabled:
                 self.autoupdate_enabled = False
                 logger.info_system("Autoupdate disabled, stopping background checker...")
                 await self.stop_autoupdate_checker()
-                await self.discord_manager.send_temp_message(message.channel, "Autoupdate is now **OFF ❌**\nBackground checker stopped.")
+                await self.discord_manager.send_temp_message(message.channel, "🛑 Autopatch stopped.")
             else:
                 logger.debug_update("Autoupdate already disabled")
-                await self.discord_manager.send_temp_message(message.channel, "Autoupdate is already **OFF ❌**")
+                await self.discord_manager.send_temp_message(message.channel, "🛑 Autopatch already stopped")
         else:
             logger.debug_update(f"Invalid autoupdate option: {parts[1]}")
             await self.discord_manager.send_temp_message(message.channel, "⚠️ Invalid option. Use `.autoupdate on` or `.autoupdate off`")
@@ -721,17 +524,16 @@ class UpdateManagementHandler:
         """Restart all servers with staggered startup"""
         from .log_manager import logger
         logger.debug_update("Starting _restart_all_servers method")
-        # Clear player data and reset log positions when restarting servers
-        if hasattr(self, 'player_manager'):
+        # Clear player data when restarting servers
+        if self.player_manager:
             logger.debug_update("Clearing player data for all servers")
             try:
-                logger.info_system("Clearing player data and resetting log positions...")
+                logger.info_system("Clearing player data...")
                 await self.player_manager.clear_server_players()
-                await self.player_manager.reset_file_positions()
-                logger.debug_update("Player data cleared successfully for all servers")
-            except PlayerOperationError as e:
-                logger.debug_update(f"Failed to clear player data: {e.reason}")
-                logger.warning_system(f"Failed to clear player data: {e.reason}")
+                logger.debug_update("Player data cleared successfully")
+            except Exception as e:
+                logger.debug_update(f"Failed to clear player logic: {e}")
+                logger.warning_system(f"Failed to clear player logic: {e}")
         
         # Staggered server restart
         logger.debug_update(f"Restarting {len(self.server_manager.servers)} servers with 30-second stagger")
@@ -741,43 +543,8 @@ class UpdateManagementHandler:
             logger.debug_update(f"Sleeping 30 seconds before next server restart")
             await asyncio.sleep(30)  # Staggered startup
         
-        # RaptorChat will be restarted after the 5-minute delay in the update/forceupdate command
+        # RaptorChat will be restarted after the 5-minute delay in the .patch / .forcepatch command
         logger.debug_update("Server restarts completed, waiting for servers to come online...")
-
-    async def _wait_for_servers_online(self, servers, timeout=300, check_interval=10):
-        """Wait for all specified servers to come online"""
-        from .log_manager import logger
-        logger.info_system(f"Waiting for {len(servers)} servers to come online...")
-        start_time = asyncio.get_event_loop().time()
-        
-        while asyncio.get_event_loop().time() - start_time < timeout:
-            all_online = True
-            
-            for server in servers:
-                if not self.server_manager.is_specific_server_running(server):
-                    all_online = False
-                    logger.debug_system(f"Server {server.name} is not yet online")
-                    break
-                
-                # Additional check to ensure RCON is responsive
-                try:
-                    await self.rcon_manager.execute_for_server(server, "SaveWorld")
-                    logger.debug_system(f"Server {server.name} is online and responsive")
-                except (RCONConnectionError, RCONCommandError):
-                    all_online = False
-                    logger.debug_system(f"Server {server.name} is running but RCON not yet responsive")
-                    break
-            
-            if all_online:
-                logger.info_system("All servers are now online and responsive")
-                return True
-                
-            await asyncio.sleep(check_interval)
-        
-        logger.warning_system("Timeout waiting for all servers to come online")
-        return False
-        
-        return True
 
     async def _restart_one_server(self, server, message):
         """Restart a single server"""
@@ -805,35 +572,54 @@ class UpdateManagementHandler:
                 logger.error_system(f"Failed to start {server.name}: {e.reason}")
                 await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to start {server.name}: {e.reason}")
 
-    async def _shutdown_all_servers(self):
+    async def _shutdown_all_servers(self, channel=None):
         """Shutdown all servers via RCON and wait for them to shut down"""
         from .log_manager import logger
         logger.debug_update("Starting _shutdown_all_servers method")
-        logger.info_system("Sending RCON command: DoExit")
+        logger.info_system("Sending RCON command: DoExit to all running servers")
+        
+        running_servers = [s for s in self.server_manager.servers if self.server_manager.is_specific_server_running(s)]
+        if channel:
+            await self.discord_manager.send_temp_message(channel, f"📡 Sending shutdown command to **{len(running_servers)}** servers...")
+        
         tasks = []
-        for server in self.server_manager.servers:
+        for server in running_servers:
             task = self.rcon_manager.execute_for_server(server, "DoExit")
             tasks.append((server, task))
         
+        success_count = 0
         for server, task in tasks:
             try:
                 await task
-                logger.info_system(f"Successfully sent to {server.name} ({server.rcon_ip}:{server.rcon_port})")
+                success_count += 1
+                logger.info_system(f"Successfully sent DoExit to {server.name}")
             except (RCONConnectionError, RCONCommandError) as e:
+                display_name = self.server_manager.get_display_name(server)
                 logger.debug_update(f"Failed to send shutdown to {server.name}: {e.reason}")
                 logger.error_system(f"Failed to send shutdown to {server.name}: {e.reason}")
+                if channel:
+                    await self.discord_manager.send_temp_message(channel, f"⚠️ Failed to send shutdown to {display_name}: {e.reason}")
         
         # Wait for all servers to shut down
         logger.debug_update("Waiting for all servers to shut down")
+        if tasks:
+            if channel:
+                await self.discord_manager.send_temp_message(channel, f"⏳ Waiting for **{len(running_servers)}** servers to shut down...")
+        
         logger.info_system("Waiting for all servers to shut down...")
         for server in self.server_manager.servers:
             logger.debug_update(f"Waiting for server {server.name} to shut down (300 seconds timeout)")
             shutdown_success = await self.server_manager.wait_for_server_shutdown(server, timeout=300)
             if not shutdown_success:
-                logger.debug_update(f"Timeout waiting for server {server.name} to shut down")
-                logger.warning_system(f"Timeout waiting for {server.name} to shut down completely")
+                logger.warning_system(f"Timeout waiting for {server.name} to shut down. Initiating Ghost Recovery...")
+                if channel:
+                    await self.discord_manager.send_temp_message(channel, f"👻 {self.server_manager.get_display_name(server)} failed to shut down. Initiating Ghost Recovery...")
+                self.server_manager.force_stop_server(server)
             else:
                 logger.debug_update(f"Server {server.name} shut down successfully")
+                
+        if channel:
+            await self.discord_manager.send_temp_message(channel, "🦕 All servers have shut down successfully")
 
     async def _broadcast_all(self, msg: str):
         """Broadcast a message to all servers"""
@@ -862,7 +648,7 @@ class UpdateManagementHandler:
             return
         self.autoupdate_enabled = True
         logger.debug_update(f"Creating autoupdate checker task with interval {interval}")
-        logger.info_system("Starting autoupdate checker...")
+        logger.info_system("Background autoupdate service initializing...")
         self.autoupdate_task = asyncio.create_task(self._autoupdate_checker_loop(discord_channel, interval=interval))
         logger.debug_update("Autoupdate checker task created successfully")
     async def stop_autoupdate_checker(self):
@@ -958,34 +744,30 @@ class UpdateManagementHandler:
                 logger.warning_system("Failed to get latest build ID for autoupdate")
                 return
             
-            if not current:
+            if not current or current == "Unknown":
                 logger.debug_update("No current version found, setting initial version")
                 logger.info_system("No current version found, performing initial update check")
-                self.last_check_version = latest
-                logger.debug_update(f"Set last_check_version to: {latest}")
-                return
             
             # Check if update is needed
-            if current != latest and self.last_check_version != latest:
-                # Get the configured channel from config
-                channel = await self.discord_manager.get_default_channel()
-                if not channel:
-                    logger.warning_system("No Discord channel available for autoupdate notification")
-                    return
+            if current != latest:
+                # Use provided discord_channel or fetch from config
+                channel = discord_channel or await self.discord_manager.get_default_channel()
                 
-                # Send notification that update was detected
-                await self.discord_manager.send_temp_message(channel, "⚠️ Update detected! Triggering update process...")
+                if channel:
+                    # Send notification that update was detected
+                    await self.discord_manager.send_temp_message(channel, "⚠️ New version detected!")
+                else:
+                    logger.info_system("Update detected. No Discord channel found; relying on Unified Path Webhooks.")
                 
-                # Create mock message object so .update works exactly like when user types it
+                # Create mock message object so .patch works exactly like when user types it
                 class MockMessage:
                     def __init__(self, channel):
                         self.channel = channel
+                        self.author = type('MockAuthor', (), {'id': 'AutoUpdateSystem', 'name': 'PatchRaptor'})()
                 
-                # Trigger .update command with proper message object
-                await self.cmd_update(MockMessage(channel), ".update", ".update")
+                # Trigger .patch command with proper message object
+                await self.cmd_patch(MockMessage(channel), ".patch", ".patch")
                 
-                # Update last check version to avoid repeated triggers
-                self.last_check_version = latest
             else:
                 logger.debug_update("No new updates found, current version is up to date")
                 logger.info_system("No new updates found")

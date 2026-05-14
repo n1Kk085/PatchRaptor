@@ -1,0 +1,4 @@
+- [docs_understanding](docs_verification.md) — Codebase documentation verified against implementation - source of truth confirmed
+- [release_pipeline] — Release package strictly partitioned; explicitly uses `readme_release.md` and excludes test artifacts.
+- [testing_isolation] — Test scripts and configurations isolated in `/tests/`; execution wrapper restores root context seamlessly.
+- [zero_clutter] — Ephemeral messaging strictly enforced via `send_temp_message` for all configuration responses and UI menus.

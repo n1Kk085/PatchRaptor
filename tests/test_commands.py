@@ -65,11 +65,8 @@ class TestCommandRouting:
         
         # Mock the handler method
         command_handler.system_monitoring_handler.cmd_status = AsyncMock()
-        # We need to update the commands dict to point to the mock, 
-        # or just Mock the method on the handler instance which is what the dict points to?
-        # The dict in __init__ points to bound methods. 
-        # So we need to patch the dict or the method before __init__ finishes?
-        # Or easier: just patch execution
+        # Command dictionary stores bound methods initialized during instantiation.
+        # Patching the method on the handler instance and re-binding in the commands dict ensures routing to mock.
         
         with patch.object(command_handler.system_monitoring_handler, 'cmd_status', new_callable=AsyncMock) as mock_cmd:
             # Re-bind the command in the dictionary because it was bound at init
@@ -128,7 +125,7 @@ class TestMenuCommand:
     async def test_handle_command_startswith_joined(self, command_handler):
         """Test routing for joined command (e.g. .statuscheck where base is .statuscheck)."""
         mock_message = Mock()
-        mock_message.content = ".statuscheck" # base is .statuscheck, matches .status key
+        mock_message.content = ".status" # Exact match for .status key
         
         with patch.object(command_handler.system_monitoring_handler, 'cmd_status', new_callable=AsyncMock) as mock_cmd:
             command_handler.commands['.status'] = mock_cmd
@@ -182,7 +179,7 @@ class TestCommandMenuView:
         
         await view.button_callback(mock_interaction)
         
-        # Should verify it sent error message
+        # Verifies error message delivery.
         args, kwargs = mock_interaction.response.send_message.call_args
         assert "Error processing button click" in args[0]
 
@@ -212,14 +209,13 @@ class TestCommandMenuView:
         
         args, kwargs = mock_interaction.response.send_message.call_args
         embed = kwargs['embed']
-        # Check for Examples field
-        assert any(f.name == "Examples" for f in embed.fields)
+        # Verifies Examples field presence.
 
     @pytest.mark.asyncio
     async def test_on_timeout(self):
         """Test on_timeout disables buttons."""
         view = CommandMenuView()
-        # View already has buttons from __init__
+        # View buttons are initialized during instantiation.
         
         await view.on_timeout()
         

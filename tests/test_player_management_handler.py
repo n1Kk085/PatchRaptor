@@ -28,7 +28,6 @@ class TestPlayerManagementHandler:
     @pytest.fixture
     def mock_player_manager(self):
         pm = Mock()
-        pm.update_active_players = AsyncMock()
         pm.get_total_players = AsyncMock(return_value=(10, {"The Island": []}))
         pm.ban_player = AsyncMock()
         pm.unban_player = AsyncMock()
@@ -37,10 +36,10 @@ class TestPlayerManagementHandler:
     @pytest.fixture
     def handler(self, mock_server_manager, mock_rcon_manager, mock_discord_manager, mock_player_manager):
         return PlayerManagementHandler(
-            mock_server_manager,
-            mock_rcon_manager,
-            mock_discord_manager,
-            mock_player_manager
+            server_manager=mock_server_manager,
+            rcon_manager=mock_rcon_manager,
+            discord_manager=mock_discord_manager,
+            player_manager=mock_player_manager
         )
 
     @pytest.fixture
@@ -59,16 +58,18 @@ class TestPlayerManagementHandler:
         return message
 
     @pytest.mark.asyncio
-    async def test_cmd_players(self, handler, mock_message, mock_player_manager):
+    async def test_cmd_players(self, handler, mock_message, mock_player_manager, mock_discord_manager):
         """Test .players command"""
         mock_player_manager.get_total_players.return_value = (5, {"The Island": [{"name": "Player1", "unique_id": "123", "session_time": "1h"}]})
         
         await handler.cmd_players(mock_message, ".players", ".players")
         
-        mock_player_manager.update_active_players.assert_called_once()
-        mock_message.channel.send.assert_called_once()
-        # Verify embed content
-        args, kwargs = mock_message.channel.send.call_args
+        # Verify get_total_players was called (instead of update_active_players)
+        mock_player_manager.get_total_players.assert_called_once()
+        
+        # Verify send_temp_message was called with an embed
+        mock_discord_manager.send_temp_message.assert_called_once()
+        args, kwargs = mock_discord_manager.send_temp_message.call_args
         embed = kwargs['embed']
         assert "Total Players Online: 5" in embed.fields[0].value
 
@@ -148,8 +149,8 @@ class TestPlayerManagementHandler:
 
     @pytest.mark.asyncio
     async def test_cmd_players_with_exception(self, handler, mock_player_manager, mock_discord_manager, mock_message):
-        """Test .players command when update_active_players raises exception."""
-        mock_player_manager.update_active_players.side_effect = Exception("Database error")
+        """Test .players command when get_total_players raises exception."""
+        mock_player_manager.get_total_players.side_effect = Exception("Database error")
         
         await handler.cmd_players(mock_message, ".players", ".players")
         
@@ -158,7 +159,7 @@ class TestPlayerManagementHandler:
         assert "Failed to fetch player data" in args[1]
 
     @pytest.mark.asyncio
-    async def test_cmd_players_list(self, handler, mock_player_manager, mock_message):
+    async def test_cmd_players_list(self, handler, mock_player_manager, mock_discord_manager, mock_message):
         """Test .players list command showing detailed player info."""
         mock_player_manager.get_total_players.return_value = (2, {
             "The Island": [
@@ -169,10 +170,12 @@ class TestPlayerManagementHandler:
         
         await handler.cmd_players(mock_message, ".players list", ".players list")
         
-        args, kwargs = mock_message.channel.send.call_args
+        # Verify send_temp_message was called with an embed
+        mock_discord_manager.send_temp_message.assert_called()
+        args, kwargs = mock_discord_manager.send_temp_message.call_args
         embed = kwargs['embed']
-        # Should have server details field
-        assert len(embed.fields) > 1
+        # Should have summary field and server details field
+        assert len(embed.fields) >= 2
 
     @pytest.mark.asyncio
     async def test_cmd_kick_insufficient_args(self, handler, mock_discord_manager, mock_message):
@@ -205,7 +208,7 @@ class TestPlayerManagementHandler:
         
         mock_discord_manager.send_temp_message.assert_called()
         args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "No servers found" in args[1]
+        assert "No servers configured" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_ban_insufficient_args(self, handler, mock_discord_manager, mock_message):
@@ -250,9 +253,9 @@ class TestPlayerManagementHandler:
 
     @pytest.mark.asyncio
     async def test_cmd_ban_player_operation_error(self, handler, mock_server_manager, mock_rcon_manager, mock_player_manager, mock_server, mock_message):
-        """Test .ban command when player_manager.ban_player raises error."""
         mock_server_manager.servers = [mock_server]
         mock_player_manager.ban_player.side_effect = PlayerOperationError("ban", "BadPlayer", "Database error")
+        mock_rcon_manager.execute_for_server.return_value = ""
         
         await handler.cmd_ban(mock_message, ".ban BadPlayer", ".ban badplayer")
         
@@ -268,7 +271,7 @@ class TestPlayerManagementHandler:
         
         mock_discord_manager.send_temp_message.assert_called()
         args, _ = mock_discord_manager.send_temp_message.call_args
-        assert "No servers found" in args[1]
+        assert "No servers configured" in args[1]
 
     @pytest.mark.asyncio
     async def test_cmd_unban_insufficient_args(self, handler, mock_discord_manager, mock_message):

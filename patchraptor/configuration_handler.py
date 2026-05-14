@@ -12,102 +12,20 @@ from .exceptions import (
     ConfigSaveError,
     ConfigLoadError
 )
+from .base_handler import BaseHandler
+from .service_locator import ServiceLocator
 
 
-class ConfigurationHandler:
-    """Handles configuration commands: webhook, discord, webpanel, chat"""
+
+class ConfigurationHandler(BaseHandler):
+    """Handles system configuration commands: webpanel, chat, discord"""
     
-    def __init__(
-        self,
-        discord_manager: DiscordManager,
-        config_manager: ConfigManager,
-        raptorchat_manager
-    ):
-        self.discord_manager = discord_manager
-        self.config_manager = config_manager
-        self.raptorchat_manager = raptorchat_manager
-
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         # Web panel process management
-        self.webpanel_process: subprocess.Popen | None = None
-        self.tunnel_process: subprocess.Popen | None = None
-
-    async def cmd_webhook(self, message, content: str, content_lower: str):
-        """Handle .webhook command - manage webhook settings"""
-        logger.info_command(".webhook received")
-        parts = content.split()
-        
-        if len(parts) == 1:
-            # Show current webhook URL
-            url = self.config_manager.get("webhook", "")
-            if url:
-                await self.discord_manager.send_temp_message(message.channel, f"Webhook configured: {url}")
-            else:
-                await self.discord_manager.send_temp_message(message.channel, "No webhook configured. Use `.webhook <url>` to set.")
-            return
-        
-        if len(parts) < 2:
-            await self.discord_manager.send_temp_message(message.channel, "⚠️ Usage: `.webhook get shutdown|reboot` or `.webhook set shutdown|reboot <message>`")
-            return
-        
-        action = parts[1].lower()
-        
-        if action == "get":
-            if len(parts) < 3:
-                await self.discord_manager.send_temp_message(message.channel, "⚠️ Usage: `.webhook get shutdown|reboot`")
-                return
-            
-            msg_type = parts[2].lower()
-            if msg_type not in ["shutdown", "reboot"]:
-                await self.discord_manager.send_temp_message(message.channel, "⚠️ Message type must be 'shutdown' or 'reboot'")
-                return
-            
-            # Check existing webhook_messages structure
-            webhook_messages = self.config_manager.get("webhook_messages", {})
-            current_msg = webhook_messages.get(msg_type, "")
-            
-            if current_msg:
-                await self.discord_manager.send_temp_message(message.channel, f"📡 {msg_type.capitalize()} webhook message: `{current_msg}`")
-            else:
-                await self.discord_manager.send_temp_message(message.channel, f"⚠️ No {msg_type} webhook message configured")
-        
-        elif action == "set":
-            if len(parts) < 4:
-                await self.discord_manager.send_temp_message(message.channel, "⚠️ Usage: `.webhook set shutdown|reboot <message>`")
-                return
-            
-            msg_type = parts[2].lower()
-            if msg_type not in ["shutdown", "reboot"]:
-                await self.discord_manager.send_temp_message(message.channel, "⚠️ Message type must be 'shutdown' or 'reboot'")
-                return
-            
-            # Join remaining parts as the message
-            webhook_message = " ".join(parts[3:])
-            
-            try:
-                # Use existing webhook_messages structure
-                if "webhook_messages" not in self.config_manager.config:
-                    self.config_manager.config["webhook_messages"] = {}
-                
-                self.config_manager.config["webhook_messages"][msg_type] = webhook_message
-                self.config_manager.save()
-                await self.discord_manager.send_temp_message(message.channel, f"✅ {msg_type.capitalize()} webhook message updated.")
-            except ConfigSaveError as e:
-                await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to save webhook message: {e.reason}")
-            except Exception as e:
-                await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to update webhook message: {e}")
-        
-        else:
-            # Treat as webhook URL setting (backward compatibility)
-            url = " ".join(parts[1:]).strip()
-            self.discord_manager.webhook_url = url
-            try:
-                self.config_manager.config["webhook"] = url
-                self.config_manager.save()
-                await self.discord_manager.send_temp_message(message.channel, "✅ Webhook URL updated.")
-            except ConfigSaveError as e:
-                await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to save webhook URL: {e.reason}")
-            except Exception as e:
-                await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to update webhook URL: {e}")
+        self.webpanel_process = None
+        self.tunnel_process = None
+        self.tunnel_monitor_task = None
 
     async def cmd_discord(self, message, content: str, content_lower: str):
         """Handle .discord command - manage Discord settings"""
@@ -195,14 +113,17 @@ class ConfigurationHandler:
         parts = content.strip().split()
 
         if len(parts) == 1:
-            status = "running ✅" if self.webpanel_process and self.webpanel_process.poll() is None else "stopped ❌"
-            await message.channel.send(f"Web panel is currently **{status}**")
+            is_running = self.webpanel_process and self.webpanel_process.poll() is None
+            if is_running:
+                await self.discord_manager.send_temp_message(message.channel, "☑️ Web Panel is Online")
+            else:
+                await self.discord_manager.send_temp_message(message.channel, "🛑 Web Panel is Offline")
             return
 
         toggle = parts[1].lower()
         if toggle == "on":
             if self.webpanel_process and self.webpanel_process.poll() is None:
-                await message.channel.send("Web panel is already **running ✅**")
+                await self.discord_manager.send_temp_message(message.channel, "☑️ Web panel is already running")
                 return
             
             try:
@@ -216,36 +137,42 @@ class ConfigurationHandler:
                 tunnel_script = os.path.join(root_dir, "start_tunnel.bat")
                 cloudflared_exe = os.path.join(root_dir, "cloudflared.exe")
                 
-                # Check for cloudflared.exe and script explicitly before launching
-                if os.path.exists(tunnel_script) and os.path.exists(cloudflared_exe):
+                # Check for cloudflared.exe, script, and config before launching
+                config_yml = os.path.join(root_dir, "config.yml")
+                if os.path.exists(tunnel_script) and os.path.exists(cloudflared_exe) and os.path.exists(config_yml):
                     try:
                         self.tunnel_process = subprocess.Popen(
                             [tunnel_script],
                             cwd=root_dir,
                             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                            shell=True
+                            shell=False
                         )
                         # Give it a moment to initialize
                         await asyncio.sleep(2)
                         
                         if self.tunnel_process.poll() is None:
-                            await message.channel.send("Tunnel started 🚇")
+                            await self.discord_manager.send_temp_message(message.channel, "🚇 Tunnel started")
                         else:
                             # It crashed immediately despite existing
                             logger.error_system("Tunnel process exited immediately.")
                             self.tunnel_process = None
-                            await message.channel.send("⚠️ Tunnel failed to start. Launching local WebPanel.")
+                            await self.discord_manager.send_temp_message(message.channel, "⚠️ Tunnel failed to start. Launching local WebPanel.")
                             
                     except Exception as e:
                         logger.error_system(f"Failed to start tunnel: {e}")
-                        await message.channel.send("⚠️ Tunnel start error. Launching local WebPanel.")
+                        await self.discord_manager.send_temp_message(message.channel, "⚠️ Tunnel start error. Launching local WebPanel.")
                 else:
-                    # Cloudflared or script missing
-                    await message.channel.send("⚠️ Tunnel not configured. Launching local WebPanel.")
+                    # Cloudflared, script, or config missing
+                    missing = []
+                    if not os.path.exists(tunnel_script): missing.append("start_tunnel.bat")
+                    if not os.path.exists(cloudflared_exe): missing.append("cloudflared.exe")
+                    if not os.path.exists(config_yml): missing.append("config.yml")
+                    
+                    reason = f"Missing: {', '.join(missing)}"
+                    await self.discord_manager.send_temp_message(message.channel, f"⚠️ Tunnel not configured ({reason}). Launching local WebPanel.")
 
                 # Start Web Panel
                 cwd = root_dir
-                
                 if getattr(sys, 'frozen', False):
                      # Running as compiled exe
                     exe_path = os.path.join(os.path.dirname(sys.executable), "WebPanel.exe")
@@ -262,59 +189,86 @@ class ConfigurationHandler:
                         cwd=cwd,
                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
                     )
-                await message.channel.send("Web panel is now **starting ✅**")
+                await self.discord_manager.send_temp_message(message.channel, "🌐 Web Panel is now ON")
             except ProcessOperationError as e:
-                await message.channel.send(f"❌ Failed to start web panel: {e.reason}")
+                await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to start web panel: {e.reason}")
             except Exception as e:
-                await message.channel.send(f"❌ Failed to start web panel: {e}")
+                logger.error_system(f"WebPanel error: {e}")
+                await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to start web panel: {e}")
                 
         elif toggle == "off":
             if not self.webpanel_process or self.webpanel_process.poll() is not None:
-                await message.channel.send("Web panel is already **stopped ❌**")
+                await self.discord_manager.send_temp_message(message.channel, "Web panel already stopped 🛑")
                 return
             
             try:
-                # Stop tunnel if running
+                # Use psutil for consistent child-aware process termination
+                import psutil
+                
+                # Stop tunnel (cloudflared.exe and its children) if running
                 if self.tunnel_process:
                     try:
-                        self.tunnel_process.terminate()
-                        # Force kill cloudflared to ensure no zombie processes
-                        if sys.platform == "win32":
-                            subprocess.run("taskkill /F /IM cloudflared.exe", shell=True, stderr=subprocess.DEVNULL)
+                        parent = psutil.Process(self.tunnel_process.pid)
                         
+                        # Terminate children first
+                        for child in parent.children(recursive=True):
+                            try:
+                                child.terminate()
+                            except psutil.NoSuchProcess:
+                                pass
+                        
+                        gone, alive = psutil.wait_procs(parent.children(), timeout=1)
+                        for p in alive:
+                            p.kill()
+                        
+                        parent.terminate()
                         try:
-                            self.tunnel_process.wait(timeout=2)
+                            parent.wait(timeout=1)
                         except subprocess.TimeoutExpired:
-                            self.tunnel_process.kill()
-                            
+                            parent.kill()
+                        
                         self.tunnel_process = None
-                        await message.channel.send("Tunnel stopped 🛑")
+                        await self.discord_manager.send_temp_message(message.channel, "🛑 Tunnel stopped")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        pass  # Already gone or access denied
                     except Exception as e:
                         logger.error(f"Error stopping tunnel: {e}")
 
-                # Stop WebPanel
-                # Force kill immediately on Windows to handle PyInstaller one-file process trees (Bootloader + App)
-                if sys.platform == "win32":
-                    subprocess.run("taskkill /F /IM WebPanel.exe", shell=True, stderr=subprocess.DEVNULL)
-                    
-                # Graceful cleanup attempt for non-Windows or if process object still exists
+                # Stop WebPanel process and its children
                 if self.webpanel_process:
-                    self.webpanel_process.terminate()
                     try:
-                        self.webpanel_process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        self.webpanel_process.kill()
+                        parent = psutil.Process(self.webpanel_process.pid)
+
+                        # Terminate children first
+                        for child in parent.children(recursive=True):
+                            try:
+                                child.terminate()
+                            except psutil.NoSuchProcess:
+                                pass
+
+                        gone, alive = psutil.wait_procs(parent.children(), timeout=1)
+                        for p in alive:
+                            p.kill()
+
+                        parent.terminate()
+                        try:
+                            parent.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            parent.kill()
+
+                    except psutil.NoSuchProcess:
+                        pass  # Already terminated
+
+                    self.webpanel_process = None
                 
-                await message.channel.send("Web panel is now **stopped ❌**")
+                await self.discord_manager.send_temp_message(message.channel, "🛑 Web Panel stopped")
                     
-                self.webpanel_process = None
-                
             except ProcessOperationError as e:
-                await message.channel.send(f"❌ Failed to stop web panel: {e.reason}")
+                await self.discord_manager.send_temp_message(message.channel, f"❌ Failed to stop web panel: {e.reason}")
             except Exception as e:
-                await message.channel.send(f"❌ Failed to stop web panel: {e}")
+                logger.error_system(f"Error stopping web panel: {e}")
         else:
-            await message.channel.send("Usage: `.webpanel on` or `.webpanel off`")
+            await self.discord_manager.send_temp_message(message.channel, "Usage: `.webpanel on` or `.webpanel off`")
 
     async def cmd_chat(self, message, content: str, content_lower: str):
         """Handle .chat command - control RaptorChat"""
@@ -331,11 +285,11 @@ class ConfigurationHandler:
         if subcommand == "status":
             if self.raptorchat_manager.is_running():
                 await self.discord_manager.send_temp_message(
-                    message.channel, "🟢 RaptorChat is **running**."
+                    message.channel, "☑️ RaptorChat is Online"
                 )
             else:
                 await self.discord_manager.send_temp_message(
-                    message.channel, "🔴 RaptorChat is **not running**."
+                    message.channel, "🛑 RaptorChat is Offline"
                 )
         
         elif subcommand == "stop":
@@ -347,7 +301,7 @@ class ConfigurationHandler:
                 success = self.raptorchat_manager.stop()
                 if success:
                     await self.discord_manager.send_temp_message(
-                        message.channel, "🛑 RaptorChat stopped."
+                        message.channel, "🛑 RaptorChat stopped"
                     )
                 else:
                     await self.discord_manager.send_temp_message(
@@ -361,7 +315,7 @@ class ConfigurationHandler:
             success = self.raptorchat_manager.reboot()
             if success:
                 await self.discord_manager.send_temp_message(
-                    message.channel, "🦖 RaptorChat restarted."
+                    message.channel, "🦖 RaptorChat restarted"
                 )
             else:
                 await self.discord_manager.send_temp_message(
@@ -372,3 +326,98 @@ class ConfigurationHandler:
             await self.discord_manager.send_temp_message(
                 message.channel, "⚠️ Unknown subcommand. Use: `status`, `stop`, or `reboot`."
             )
+
+    def _process_tunnel_line(self, line: str):
+        """Processes and translates Cloudflare tunnel output to friendly logs."""
+        if not line:
+            return
+
+        line = line.strip()
+        
+        # Friendly translations for common Cloudflare messages
+        if "stream canceled by remote" in line.lower():
+            logger.info_web("Tunnel stream adjusted by remote endpoint.")
+            return
+
+        # Standard Cloudflare log format: [TIMESTAMP] [LEVEL] [MESSAGE]
+        # Example: 2024-04-17T03:19:33Z INF Testing
+        parts = line.split()
+        if len(parts) >= 3:
+            level = parts[1]
+            message = " ".join(parts[2:])
+            
+            if level == "INF":
+                logger.info_web(f"Tunnel: {message}")
+            elif level == "ERR":
+                logger.error_web(f"Tunnel Error: {message}")
+            elif level == "WRN":
+                logger.warning_web(f"Tunnel Warning: {message}")
+        else:
+            logger.debug_web(f"Tunnel Data: {line}")
+
+    async def cleanup(self):
+        """Final cleanup using psutil for all process termination - ensures child awareness"""
+        logger.info_system("ConfigurationHandler: Cleaning up external processes with psutil...")
+        
+        # 1. Stop WebPanel using psutil tree kill
+        if self.webpanel_process:
+            logger.debug_system("ConfigurationHandler: Terminating WebPanel process tree...")
+            try:
+                import psutil
+                parent = psutil.Process(self.webpanel_process.pid)
+                
+                # Terminate children first (handles any spawned sub-processes)
+                for child in parent.children(recursive=True):
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                
+                gone, alive = psutil.wait_procs(parent.children(), timeout=1)
+                for p in alive:
+                    p.kill()
+                
+                parent.terminate()
+                try:
+                    parent.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    parent.kill()
+                
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # Already terminated or access denied
+                pass
+            except Exception as e:
+                logger.error_system(f"Error during WebPanel cleanup: {e}")
+            
+            self.webpanel_process = None
+
+        # 2. Stop Tunnel using psutil tree kill
+        if self.tunnel_process:
+            logger.debug_system("ConfigurationHandler: Terminating Tunnel process tree...")
+            try:
+                import psutil
+                parent = psutil.Process(self.tunnel_process.pid)
+                
+                # Terminate children first (handles cloudflared and any sub-processes)
+                for child in parent.children(recursive=True):
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                
+                gone, alive = psutil.wait_procs(parent.children(), timeout=1)
+                for p in alive:
+                    p.kill()
+                
+                parent.terminate()
+                try:
+                    parent.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    parent.kill()
+            
+            except psutil.NoSuchProcess:
+                pass  # Already terminated
+            except Exception as e:
+                logger.error_system(f"Error during Tunnel cleanup: {e}")
+            
+            self.tunnel_process = None

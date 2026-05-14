@@ -24,7 +24,7 @@ class TestLogUtils:
             
             assert result is not None
             assert result["rcon_port"] == 27020
-            # map name regex is simple substrings in log_utils, might match "TheIsland"
+            # Map name regex matches "TheIsland" using substring comparison.
             assert result["map_name"] == "theisland"
 
     def test_extract_info_spaced_format(self):

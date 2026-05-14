@@ -18,22 +18,14 @@ from .exceptions import (
     PlayerNotFoundError,
     PlayerOperationError
 )
+from .base_handler import BaseHandler
 
 
-class PlayerManagementHandler:
-    """Handles player management commands: players, kick, ban, unban"""
+class PlayerManagementHandler(BaseHandler):
+    """Handles player moderation commands: players, kick, ban, unban"""
     
-    def __init__(
-        self,
-        server_manager: ServerManager,
-        rcon_manager: RCONManager,
-        discord_manager: DiscordManager,
-        player_manager: PlayerManager
-    ):
-        self.server_manager = server_manager
-        self.rcon_manager = rcon_manager
-        self.discord_manager = discord_manager
-        self.player_manager = player_manager
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     async def cmd_players(self, message, content: str, content_lower: str):
         """Handle .players command - show player information"""
@@ -42,7 +34,6 @@ class PlayerManagementHandler:
         
         try:
             # Ensure player data is fully updated before getting the count
-            await self.player_manager.update_active_players()
             
             # Get fresh data after update
             total_players, server_details = await self.player_manager.get_total_players()
@@ -58,8 +49,7 @@ class PlayerManagementHandler:
             return
         servers_checked = len(self.server_manager.servers)
         
-        import discord as _discord
-        embed = _discord.Embed(title="Player Information", color=0x99AAB5)
+        embed = discord.Embed(title="Player Information", color=0x99AAB5)
         summary_text = f"Total Players Online: {total_players}\nServers Checked: {servers_checked}"
         embed.add_field(name="Summary", value=summary_text, inline=False)
         
@@ -70,16 +60,17 @@ class PlayerManagementHandler:
                     player_list = "\n".join([f"{p['name']} | {p['unique_id']} | {p['session_time']}" for p in players])
                 else:
                     player_list = "No players online"
-                lines.append(f"**{display_name}**\n{player_list}")
+                lines.append(f"{display_name}\n{player_list}")
             
             if lines:
                 embed.add_field(name="Server Details", value="\n\n".join(lines), inline=False)
         
-        await message.channel.send(embed=embed)
+        await self.discord_manager.send_temp_message(message.channel, embed=embed)
 
     async def cmd_kick(self, message, content: str, content_lower: str):
         """Handle .kick command - kick players from all servers"""
         logger.info_command(".kick received")
+        action_text = "Kicking"
         parts = content.split()
         if len(parts) < 2:
             await self.discord_manager.send_temp_message(
@@ -90,46 +81,38 @@ class PlayerManagementHandler:
         player_name = " ".join(parts[1:])
         kick_command = f"KickPlayer {player_name}"
         
+        if not self.server_manager.servers:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ No servers configured.")
+            return
+        
         logger.debug_player(f"Attempting to kick player '{player_name}' across {len(self.server_manager.servers)} servers")
         
-        successful_kicks = []
-        failed_kicks = []
-        
+        success_count = 0
         # Iterate through all servers in the cluster
         for server in self.server_manager.servers:
-            logger.debug_player(f"Processing kick for server: {server.name} ({self.server_manager.get_display_name(server)})")
             try:
-                logger.debug_player(f"Executing RCON command on {server.name}: {kick_command}")
                 await self.rcon_manager.execute_for_server(server, kick_command)
-                successful_kicks.append(self.server_manager.get_display_name(server))
+                success_count += 1
                 logger.info_system(f"Kicked player '{player_name}' from {server.name}")
-                logger.debug_player(f"Kick successful for {server.name}")
             except (RCONConnectionError, RCONCommandError) as e:
-                failed_kicks.append(f"{self.server_manager.get_display_name(server)}: {e.reason}")
+                display_name = self.server_manager.get_display_name(server)
+                await self.discord_manager.send_temp_message(message.channel, f"⚠️ Failed to kick from {display_name}: {e.reason}")
                 logger.warning_system(f"Failed to kick player '{player_name}' from {server.name}: {e.reason}")
-                logger.debug_player(f"Kick failed for {server.name}: {e.reason}")
         
-        logger.debug_player(f"Kick operation summary: {len(successful_kicks)} successful, {len(failed_kicks)} failed")
+        if success_count > 0:
+            await self.discord_manager.send_temp_message(message.channel, f"⌨️ Sent kick command for '{player_name}' to all servers...")
+        
+        logger.debug_player(f"Kick operation completed. Success count: {success_count}")
         
         # Send summary message
-        if successful_kicks:
-            await self.discord_manager.send_temp_message(
-                message.channel, f"✅ Kicked player '{player_name}'"
-            )
+
         
-        if failed_kicks:
-            await self.discord_manager.send_temp_message(
-                message.channel, f"⚠️ Failed to kick '{player_name}'"
-            )
-        
-        if not successful_kicks and not failed_kicks:
-            await self.discord_manager.send_temp_message(
-                message.channel, f"⚠️ No servers found to kick player '{player_name}' from"
-            )
+        return
 
     async def cmd_ban(self, message, content: str, content_lower: str):
         """Handle .ban command - ban players from all servers"""
         logger.info_command(".ban received")
+        action_text = "Banning"
         parts = content.split()
         if len(parts) < 2:
             await self.discord_manager.send_temp_message(
@@ -138,11 +121,13 @@ class PlayerManagementHandler:
             return
         
         player_input = " ".join(parts[1:])
-        successful_bans = []
-        failed_bans = []
         player_unique_id = None
         player_name = player_input
         
+        if not self.server_manager.servers:
+            await self.discord_manager.send_temp_message(message.channel, "⚠️ No servers configured.")
+            return
+
         # Check if input looks like a unique ID (hexadecimal format)
         import re
         logger.debug_player(f"BAN: Checking if input '{player_input}' matches unique ID pattern")
@@ -185,21 +170,20 @@ class PlayerManagementHandler:
             logger.info_system(f"Banning player '{player_name}' by name (unique ID not found)")
             logger.debug_player(f"Using player name for ban command: {ban_command}")
         
+        success_count = 0
         # Iterate through all servers in the cluster
         for server in self.server_manager.servers:
-            logger.debug_player(f"Processing ban for server: {server.name} ({self.server_manager.get_display_name(server)})")
             try:
-                logger.debug_player(f"Executing RCON command on {server.name}: {ban_command}")
                 await self.rcon_manager.execute_for_server(server, ban_command)
-                successful_bans.append(self.server_manager.get_display_name(server))
+                success_count += 1
                 logger.info_system(f"Banned player '{player_name}' from {server.name}")
-                logger.debug_player(f"Ban successful for {server.name}")
             except (RCONConnectionError, RCONCommandError) as e:
-                failed_bans.append(f"{self.server_manager.get_display_name(server)}: {e.reason}")
+                display_name = self.server_manager.get_display_name(server)
+                await self.discord_manager.send_temp_message(message.channel, f"⚠️ Failed to ban from {display_name}: {e.reason}")
                 logger.warning_system(f"Failed to ban player '{player_name}' from {server.name}: {e.reason}")
-                logger.debug_player(f"Ban failed for {server.name}: {e.reason}")
         
-        logger.debug_player(f"Ban operation summary: {len(successful_bans)} successful, {len(failed_bans)} failed")
+        if success_count > 0:
+            await self.discord_manager.send_temp_message(message.channel, f"⌨️ Sent ban command for '{player_name}' to all servers...")
         
         # Add to player manager's ban list for tracking
         try:
@@ -210,20 +194,9 @@ class PlayerManagementHandler:
             logger.debug_player(f"Ban list addition failed for '{player_name}': {e.reason}")
         
         # Send summary message
-        if successful_bans:
-            await self.discord_manager.send_temp_message(
-                message.channel, f"🚫 Banned player '{player_name}'"
-            )
+
         
-        if failed_bans:
-            await self.discord_manager.send_temp_message(
-                message.channel, f"⚠️ Failed to ban '{player_name}'"
-            )
-        
-        if not successful_bans and not failed_bans:
-            await self.discord_manager.send_temp_message(
-                message.channel, f"⚠️ No servers found to ban player '{player_name}' from"
-            )
+        return
 
     async def cmd_unban(self, message, content: str, content_lower: str):
         """Handle .unban command - unban players"""
@@ -289,7 +262,7 @@ class PlayerManagementHandler:
 
                     logger.info_system(f"Unbanned player '{player_name}'")
                     await self.discord_manager.send_temp_message(
-                        message.channel, f"✅ Unbanned player '{player_name}' from all servers"
+                        message.channel, f"⌨️ Sent unban command for '{player_name}' to all servers..."
                     )
                 else:
                     await self.discord_manager.send_temp_message(
@@ -323,7 +296,6 @@ class PlayerManagementHandler:
             logger.debug_player(f"ListPlayers output from {server.name}: {output[:200]}...")
             
             # Parse the player list output to find the player and their ID
-            # This is a simplified approach - actual parsing depends on ARK's output format
             lines = output.split('\n')
             logger.debug_player(f"Parsing {len(lines)} lines from player list")
             
@@ -332,7 +304,6 @@ class PlayerManagementHandler:
                 if player_name.lower() in line.lower():
                     logger.debug_player(f"Found potential match for '{player_name}' in line {i+1}")
                     # Extract player ID from the line (format may vary)
-                    # This is a basic implementation - you may need to adjust based on actual ARK output
                     parts = line.split()
                     if len(parts) >= 2:
                         player_id = parts[-1]  # Usually the last part is the Steam ID

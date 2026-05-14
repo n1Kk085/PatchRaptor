@@ -17,12 +17,14 @@ class TestBackupRestoreHandler:
             "discord_manager": Mock(),
             "config_manager": Mock(),
             "raptorchat_manager": Mock(),
+            "player_manager": Mock(),
+            "telemetry_manager": Mock(),
         }
         deps["discord_manager"].send_temp_message = AsyncMock()
         deps["rcon_manager"].execute_for_server = AsyncMock()
         deps["server_manager"].wait_for_server_shutdown = AsyncMock()
-        deps["server_manager"].start_server = Mock() # Not async usually? check source. start_server is sync in most args, but might be mocked.
-        # Check source: start_server calls process creation. It is likely synchronous as per previous files.
+        deps["server_manager"].start_server = Mock() # start_server is synchronous.
+        # start_server handles process creation synchronously.
         # But wait, lines 280 in backup_restore_handler.py: self.server_manager.start_server(server) (not awaited)
         
         deps["config_manager"].config = {}
@@ -34,12 +36,14 @@ class TestBackupRestoreHandler:
     @pytest.fixture
     def handler(self, mock_deps):
         return BackupRestoreHandler(
-            mock_deps["server_manager"],
-            mock_deps["rcon_manager"],
-            mock_deps["backup_manager"],
-            mock_deps["discord_manager"],
-            mock_deps["config_manager"],
-            mock_deps["raptorchat_manager"]
+            server_manager=mock_deps["server_manager"],
+            rcon_manager=mock_deps["rcon_manager"],
+            backup_manager=mock_deps["backup_manager"],
+            discord_manager=mock_deps["discord_manager"],
+            config_manager=mock_deps["config_manager"],
+            raptorchat_manager=mock_deps["raptorchat_manager"],
+            player_manager=mock_deps["player_manager"],
+            telemetry_manager=mock_deps["telemetry_manager"]
         )
 
     @pytest.fixture
@@ -119,7 +123,7 @@ class TestBackupRestoreHandler:
              msg = mock_deps["discord_manager"].send_temp_message.call_args[0][1]
              assert "1. " in msg
              assert "2. " in msg
-             assert "TheIsland_2.zip" in msg # Newest first locally logic (though test sort logic might vary)
+             assert "TheIsland_2.zip" in msg # Verifies "TheIsland_2.zip" is present in message.
 
     @pytest.mark.asyncio
     async def test_cmd_restore_flow(self, handler, mock_message, mock_deps):
@@ -139,8 +143,9 @@ class TestBackupRestoreHandler:
              patch("os.path.exists", return_value=True), \
              patch("shutil.copytree") as mock_copy, \
              patch("shutil.rmtree") as mock_rm, \
-             patch("patchraptor.backup_restore_handler.BackupRestoreHandler.safe_extract") as mock_extract, \
-             patch("patchraptor.raptorchat_utils.RaptorChatUtils.delayed_raptorchat_restart", new_callable=AsyncMock) as mock_delay:
+             patch("patchraptor.backup_restore_handler.BackupRestoreHandler.safe_extract") as mock_extract:
+             
+             mock_deps["server_manager"].wait_for_servers_online = AsyncMock(return_value=True)
              
              await handler.cmd_restore(mock_message, ".restore TheIsland 1", ".restore theisland 1")
              
@@ -159,8 +164,8 @@ class TestBackupRestoreHandler:
              # 4. Restart
              mock_deps["server_manager"].start_server.assert_called_with(server)
              
-             # 5. RaptorChat delay
-             mock_delay.assert_awaited()
+             # 5. Wait for online
+             mock_deps["server_manager"].wait_for_servers_online.assert_awaited()
     
     def test_safe_extract_path_traversal(self):
         """Test safe_extract prevents traversal"""
@@ -360,11 +365,9 @@ class TestBackupRestoreHandler:
              patch("os.path.getsize", return_value=1024), \
              patch("os.path.exists", return_value=True), \
              patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch("asyncio.to_thread", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop") as mock_loop, \
-             patch("patchraptor.backup_restore_handler.BackupRestoreHandler.safe_extract"), \
-             patch("patchraptor.raptorchat_utils.RaptorChatUtils.delayed_raptorchat_restart", new_callable=AsyncMock):
-            mock_loop.return_value.time.side_effect = [0, 10]  # Simulate time passing
+             patch("patchraptor.backup_restore_handler.BackupRestoreHandler.safe_extract"):
+            
+            mock_deps["server_manager"].wait_for_servers_online = AsyncMock(return_value=True)
             await handler.cmd_restore(mock_message, ".restore TestServer 1", ".restore testserver 1")
         
         # Should still proceed with restore
@@ -394,16 +397,10 @@ class TestBackupRestoreHandler:
              patch("os.path.exists", return_value=True), \
              patch("shutil.copytree"), \
              patch("shutil.rmtree"), \
-             patch("patchraptor.backup_restore_handler.BackupRestoreHandler.safe_extract"), \
-             patch("asyncio.sleep", side_effect=mock_sleep), \
-             patch("asyncio.get_event_loop") as mock_loop:
-            # Mock time to simulate timeout
-            mock_loop.return_value.time.side_effect = [0, 301]  # Immediate timeout
+             patch("patchraptor.backup_restore_handler.BackupRestoreHandler.safe_extract"):
             
-            try:
-                await handler.cmd_restore(mock_message, ".restore TestServer 1", ".restore testserver 1")
-            except asyncio.TimeoutError:
-                pass  # Expected
+            mock_deps["server_manager"].wait_for_servers_online = AsyncMock(return_value=False)
+            await handler.cmd_restore(mock_message, ".restore TestServer 1", ".restore testserver 1")
         
         # Should send timeout message
         calls = [str(call) for call in mock_deps["discord_manager"].send_temp_message.call_args_list]

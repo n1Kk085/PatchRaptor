@@ -12,15 +12,7 @@ import os
 import json
 import ctypes
 import sys
-
-def resource_path(relative_path):
-    if hasattr(sys, "_MEIPASS"):
-        # Running from PyInstaller bundle folder
-        base_path = sys._MEIPASS
-    else:
-        # Running in normal python environment
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+from patchraptor.gui_utils import resource_path, GUI_COLORS, GUI_FONTS
 
 EULA_STATUS_FILE = "eula_accepted.json"
 
@@ -36,8 +28,8 @@ SERVER_KEYS = [
     "server_rcon_password", "server_start_command"
 ]
 
-BUTTON_COLOR = "#5B83C9"
-FONT_NAME = "Consolas"
+BUTTON_COLOR = GUI_COLORS["PRIMARY"]
+FONT_NAME = GUI_FONTS["MAIN"]
 FONT_SIZE = 12
 
 class ConfigApp:
@@ -57,7 +49,6 @@ class ConfigApp:
         self.create_widgets()
         self.center_window()
 
-        self.center_window()
         
         if self.check_eula_status():
             print("EULA already accepted. Starting normally.")
@@ -434,11 +425,11 @@ Last updated: February 8, 2026"""
             print("Failed to load image:", e)
             self.logo_img = None
 
-        top_frame = ctk.CTkFrame(self.root, fg_color="#222222")
+        top_frame = ctk.CTkFrame(self.root, fg_color=GUI_COLORS["DARK_BG"])
         top_frame.pack(fill="x", padx=5, pady=10)
 
         if self.logo_img:
-            logo_label = ctk.CTkLabel(top_frame, image=self.logo_img, fg_color="#222222", text="")
+            logo_label = ctk.CTkLabel(top_frame, image=self.logo_img, fg_color=GUI_COLORS["DARK_BG"], text="")
             logo_label.pack(side="left", padx=(0, 5))
         else:
             print("No logo image to display")

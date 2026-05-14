@@ -24,16 +24,20 @@ Quick overview of Host System Health.
 Displays a detailed status report for all configured servers.
 - **Output:** Map Name, Server uptime, CPU/RAM usage per server process, and save folder size for each map.
 
+### `.analytics`
+Show deep historical performance and player trends.
+- **Output:** Player Vitality (7-Day peak/average), Reliability Score (Average Uptime), and Performance Trends (CPU/RAM/Disk averages).
+
 ### `.check`
 Manually checks steam for a new version.
 - **Output:** Compares current build ID (saved in version.txt) with latest available on SteamDB.
 
-### `.autoupdate [on|off]`
+### `.autopatch [on|off]`
 Manages the background auto-update checker.
 - **Usage:**
-    - `.autoupdate`: Shows current status and background task state. (.autoupdate is on by default. The first time you launch PatchRaptor the autoupdate checker will run after 10 minutes, find no version.txt, assume there is an update and trigger the `.update` process. You can avoid this by running `.check` immediately, copy the build update id and save that into a version.txt file in the root directory of PatchRaptor. This will prevent the autoupdate checker from running on first launch.)
-    - `.autoupdate on`: Enables auto-checker (checks every 10 minutes).
-    - `.autoupdate off`: Disables auto-checker.
+    - `.autopatch`: Shows current status and background task state. (.autopatch is on by default. The first time you launch PatchRaptor the autopatch checker will run after 10 minutes, find no version.txt, assume there is an update and trigger the `.patch` process. You can avoid this by running `.check` immediately, copy the build update id and save that into a version.txt file in the root directory of PatchRaptor. This will prevent the autopatch checker from running on first launch.)
+    - `.autopatch on`: Enables auto-checker (checks every 10 minutes).
+    - `.autopatch off`: Disables auto-checker.
 
 ---
 
@@ -56,14 +60,14 @@ Gracefully stops the ARK servers.
 
 ### `.cancel`
 Cancels any ongoing timer or long-running operation.
-- **Trigger:** Use this to cancel an update countdown triggered by `.update`.
+- **Trigger:** Use this to cancel an update countdown triggered by `.patch`.
 
 ---
 
 ## Server Updates
 Commands related to SteamCMD updates.
 
-### `.update`
+### `.patch`
 Starts a **Scheduled Maintenance Update** with a 15-minute countdown.
 - **Process:**
     1.  Sends Webhook Shutdown message (if configured).
@@ -76,12 +80,43 @@ Starts a **Scheduled Maintenance Update** with a 15-minute countdown.
     8.  Waits 5 minutes
     9.  Reconnects Chat Relay
 
+#### `.patch` Subcommands
 
-### `.forceupdate [map_name]`
+##### `.patch status`
+Displays the current patch configuration (timer, intervals, broadcast template, webhooks).
+- **Usage:** `.patch status`
+
+##### `.patch timer <minutes>`
+Sets the countdown duration before shutdown begins.
+- **Usage:** `.patch timer 15`
+- **Example:** `.patch timer 20` — sets a 20-minute countdown.
+
+##### `.patch broadcast <template>`
+Sets the in-game RCON broadcast message sent to all servers at each countdown interval.
+- **Placeholder:** `{minutes}` — automatically replaced with the **minutes remaining** at the time each broadcast fires (e.g. at the 10-minute interval it becomes `10`, at the 5-minute interval it becomes `5`, etc.).
+- **Usage:** `.patch broadcast Server shutdown in {minutes} minutes...`
+- **Example:** `.patch broadcast Save your progress! Maintenance in {minutes} minutes.`
+
+##### `.patch intervals <list>`
+Sets which minute marks trigger an in-game broadcast. Comma-separated list.
+- **Usage:** `.patch intervals 15,10,5,1`
+- **Example:** `.patch intervals 30,15,10,5,1` — adds a 30-minute warning.
+- **Note:** Any interval values greater than the configured timer are silently ignored.
+
+##### `.patch webhook <shutdown|reboot> <message>`
+Sets the Discord webhook announcement message sent at patch start (`shutdown`) or patch completion (`reboot`).
+- **Placeholders:**
+    - `{timer}` *(shutdown only)* — replaced with the **total countdown duration in minutes** at the moment the webhook fires (e.g. if your timer is 15, `{timer}` becomes `15`).
+    - The `reboot` message has no placeholders — it fires after servers are confirmed online.
+- **Usage:**
+    - `.patch webhook shutdown Server going down for maintenance in {timer} minutes!`
+    - `.patch webhook reboot Patch complete! Cluster is back online.`
+
+
+### `.forcepatch`
 Starts an **Immediate Update** (No countdown).
 - **Usage:**
-    - `.forceupdate`: Updates ALL servers immediately.
-    - `.forceupdate <map_name>`: Updates specific server immediately.
+    - `.forcepatch`: Updates ALL servers immediately.
 - **Warning:** Players will be disconnected instantly.
 - **Process:**
     1.  Shuts down all servers via RCON (DoExit)
@@ -135,18 +170,6 @@ Unbans a player from **ALL** servers.
 
 ---
 
-## Webhook Settings
-Customize the bot's automated announcements.
-
-### `.webhook <get|set> <type> [message]`
-Configures Discord webhook messages used by the `.update` command.
-- **Usage:**
-    - `.webhook set shutdown Server is shutting down!`: Custom shutdown message.
-    - `.webhook set reboot Server is restarting!`: Custom reboot message.
-    - `.webhook get shutdown`: View current message.
-
----
-
 ## Backup System
 Manage your server saves.
 
@@ -165,7 +188,7 @@ Restores a previous backup.
 
 ---
 
-## Scheduling system
+## Automations
 Automate repetitive tasks.
 
 ### `.schedule`

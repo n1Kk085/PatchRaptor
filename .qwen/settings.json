@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(C:\\Users\\nikko\\AppData\\Roaming\\Code\\User/**)",
+      "Bash(python *)",
+      "Bash(get-content *)",
+      "Bash(select-object *)",
+      "Bash(tee-object *)",
+      "Bash($test_output[-50..]$ *)",
+      "Bash(out-string)",
+      "Bash(dir *)",
+      "Bash(rm *)",
+      "Bash(del *)",
+      "Bash(ren *)",
+      "Read(C:\\Users\\nikko\\.qwen\\projects\\d--patchraptor/**)",
+      "Read(C:\\Users\\nikko\\.qwen\\projects\\d--patchraptor\\docs/**)",
+      "Bash(n)",
+      "Bash(mermaid *)",
+      "Bash(out-file *)",
+      "Bash(sed *)",
+      "Bash(echo *)",
+      "Bash(powershell *)",
+      "Bash(set-content *)",
+      "Bash(perl *)",
+      "Bash(move-item *)",
+      "Bash(copy-item *)",
+      "Bash(git checkout *)",
+      "Bash(write-host *)",
+      "Bash(mermaid.initialize)",
+      "Bash(document.addeventlistener)",
+      "Bash(const *)",
+      "Bash(\"\"\"pre > code.language-mermaid\"\"\")",
+      "Bash(try *)",
+      "Bash(16)",
+      "Bash(.slice)",
+      "Bash(block.parentelement.outerhtml *)",
+      "Bash(})",
+      "Bash(test-path *)"
+    ]
+  },
+  "$version": 4
+}

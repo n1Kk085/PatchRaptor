@@ -6,6 +6,8 @@ PatchRaptor is a comprehensive toolkit, designed to enhance your existing SteamC
 
 PatchRaptor does **not** set up ARK servers for you. It is a management layer that enhances an existing, functional server environment.
 
+*Internal Designation: PatchRaptor (Cherry)*
+
 > **Note**: This repository contains the source code for transparency and security auditing. For official downloads, visit [patchraptor.online](https://patchraptor.online).
 
 ## 🛡️ License & Transparency
@@ -113,14 +115,14 @@ Once the bot is "Online" in Discord, verify your setup:
 1. **The Clickable Dashboard**: Type `.menu` in your configured channel.
 2. **System Health Check**: Type `.diagnose`. This runs a comprehensive scan of your paths and connectivity.
 
-### 4. Web Panel & Dashboards (Optional)
-To use the live web dashboard:
+### 4. Brand-Aligned Web Dashboard (Optional)
+To use the live, brand-aligned web dashboard:
 - Create a username/password in `webpanel_config.example.json` and rename it to `webpanel_config.json`.
 - Run **`.webpanel on`** in Discord or launch `pr_live.py` manually:
   ```bash
   python pr_live.py
   ```
-- Access locally at `http://localhost:8080`.
+- Access the high-performance, real-time interface at `http://localhost:8095`.
 
 ---
 

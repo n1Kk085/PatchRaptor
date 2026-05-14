@@ -1,6 +1,4 @@
-"""
-Shared test fixtures and utilities for PatchRaptor tests.
-"""
+"""Shared test fixtures and utilities for PatchRaptor tests."""
 import pytest
 import asyncio
 from pathlib import Path
@@ -41,8 +39,6 @@ def mock_config_data(mock_server_config):
 
 
 
-
-
 # Test utilities
 
 def assert_no_secrets_in_string(text: str, secrets: list[str]):
@@ -54,3 +50,4 @@ def assert_no_secrets_in_string(text: str, secrets: list[str]):
 def create_mock_log_line(player_name: str, message: str, timestamp: str = "2026.02.03-12.00.00") -> str:
     """Create a mock ARK log line."""
     return f"[{timestamp}] {player_name}: {message}"
+
